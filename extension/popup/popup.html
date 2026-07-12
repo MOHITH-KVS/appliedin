@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AppliedIn</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <span class="logo">📋</span>
+      <span class="app-name">AppliedIn</span>
+    </div>
+    <div class="header-right">
+      <span class="total-count" id="totalCount">0 Total</span>
+    </div>
+  </div>
+
+  <!-- Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat">
+      <div class="stat-value" id="statToday">0</div>
+      <div class="stat-label">Today</div>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
+      <div class="stat-value" id="statYesterday">0</div>
+      <div class="stat-label">Yesterday</div>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
+      <div class="stat-value" id="statWeek">0</div>
+      <div class="stat-label">This Week</div>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
+      <div class="stat-value" id="statMonth">0</div>
+      <div class="stat-label">This Month</div>
+    </div>
+  </div>
+
+  <!-- Search Bar -->
+  <div class="search-wrap">
+    <input
+      type="text"
+      id="searchInput"
+      placeholder="🔍 Search company or role..."
+      autocomplete="off"
+    />
+  </div>
+
+  <!-- Filter Tabs -->
+  <div class="filter-tabs">
+    <button class="tab active" data-filter="all">All</button>
+    <button class="tab" data-filter="Applied">Applied</button>
+    <button class="tab" data-filter="In Review">In Review</button>
+    <button class="tab" data-filter="Interview">Interview</button>
+    <button class="tab" data-filter="Shortlisted">Shortlisted</button>
+    <button class="tab" data-filter="Rejected">Rejected</button>
+  </div>
+
+  <!-- Applications List -->
+  <div class="applications-list" id="applicationsList"></div>
+
+  <!-- Empty State -->
+  <div class="empty-state" id="emptyState" style="display:none;">
+    <div class="empty-icon">📭</div>
+    <div class="empty-title">No applications yet</div>
+    <div class="empty-subtitle">Start applying on LinkedIn, Naukri, or Internshala and they'll appear here automatically.</div>
+  </div>
+
+  <!-- Bottom Actions -->
+  <div class="bottom-bar">
+    <button class="btn-add" id="btnAdd">+ Add Manually</button>
+    <button class="btn-export" id="btnExport">⬇ CSV</button>
+    <button class="btn-excel" id="btnExcel">📊 Excel</button>
+  </div>
+
+  <!-- Manual Add Modal -->
+  <div class="modal-overlay" id="modalOverlay" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Add Application</span>
+        <button class="modal-close" id="modalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="addCompany" placeholder="Company name *" />
+        <input type="text" id="addRole" placeholder="Job role *" />
+        <input type="text" id="addLocation" placeholder="Location (optional)" />
+        <select id="addPlatform">
+          <option value="">Select Platform</option>
+          <option value="LinkedIn">LinkedIn</option>
+          <option value="Naukri">Naukri</option>
+          <option value="Internshala">Internshala</option>
+          <option value="Indeed">Indeed</option>
+          <option value="Glassdoor">Glassdoor</option>
+          <option value="Unstop">Unstop</option>
+          <option value="Company Website">Company Website</option>
+          <option value="Other">Other</option>
+        </select>
+        <select id="addStatus">
+          <option value="Applied">Applied</option>
+          <option value="In Review">In Review</option>
+          <option value="Interview">Interview</option>
+          <option value="Shortlisted">Shortlisted</option>
+          <option value="Rejected">Rejected</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" id="btnCancel">Cancel</button>
+        <button class="btn-save" id="btnSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Period Modal -->
+  <div class="modal-overlay" id="exportModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="exportModalTitle">Export Applications</span>
+        <button class="modal-close" id="exportModalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="period-options">
+          <label class="period-option">
+            <input type="radio" name="exportPeriod" value="today" />
+            <span>Today</span>
+          </label>
+          <label class="period-option">
+            <input type="radio" name="exportPeriod" value="yesterday" />
+            <span>Yesterday</span>
+          </label>
+          <label class="period-option">
+            <input type="radio" name="exportPeriod" value="week" />
+            <span>This Week</span>
+          </label>
+          <label class="period-option">
+            <input type="radio" name="exportPeriod" value="month" />
+            <span>This Month</span>
+          </label>
+          <label class="period-option">
+            <input type="radio" name="exportPeriod" value="year" />
+            <span>This Year</span>
+          </label>
+          <label class="period-option">
+            <input type="radio" name="exportPeriod" value="all" checked />
+            <span>All Time</span>
+          </label>
+        </div>
+        <div class="period-count" id="periodCount">0 applications selected</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" id="exportCancel">Cancel</button>
+        <button class="btn-save" id="exportDownload">Download</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../xlsx.full.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

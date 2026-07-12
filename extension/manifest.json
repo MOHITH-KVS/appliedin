@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "AppliedIn",
+  "version": "1.0.0",
+  "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Built for Indian freshers.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://www.naukri.com/*",
+    "https://internshala.com/*",
+    "https://www.indeed.com/*",
+    "https://www.glassdoor.co.in/*",
+    "https://unstop.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content/linkedin.js"]
+    },
+    {
+      "matches": ["https://www.naukri.com/*"],
+      "js": ["content/naukri.js"]
+    },
+    {
+      "matches": ["https://internshala.com/*"],
+      "js": ["content/internshala.js"]
+    },
+    {
+      "matches": ["https://www.indeed.com/*"],
+      "js": ["content/indeed.js"]
+    },
+    {
+      "matches": ["https://www.glassdoor.co.in/*"],
+      "js": ["content/glassdoor.js"]
+    },
+    {
+      "matches": ["https://unstop.com/*"],
+      "js": ["content/unstop.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["xlsx.full.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
