@@ -1,9 +1,8 @@
 // AppliedIn - LinkedIn Content Script
-// Watches for Easy Apply button clicks and captures job details
+// Captures ONLY on final submission confirmation
 
 (function () {
-  let lastCapturedUrl = '';
-  let captureTimeout = null;
+  let captured = false;
 
   function getJobDetails() {
     try {
@@ -16,18 +15,16 @@
       const company =
         document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
         document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
-        document.querySelector('a.ember-view.t-black.t-normal')?.innerText?.trim() ||
         'Unknown Company';
 
       const location =
         document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() ||
-        document.querySelector('.job-details-jobs-unified-top-card__primary-description-without-tagline')?.innerText?.trim() ||
         'Unknown Location';
 
       return {
-        company: company,
+        company,
         role: title,
-        location: location,
+        location,
         platform: 'LinkedIn',
         url: window.location.href,
         date: new Date().toISOString(),
@@ -42,7 +39,6 @@
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
-      // Duplicate check — same company + role within 24 hours
       const isDuplicate = applications.some(app =>
         app.company.toLowerCase() === jobData.company.toLowerCase() &&
         app.role.toLowerCase() === jobData.role.toLowerCase() &&
@@ -57,18 +53,18 @@
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
         showNotification('✅ Application saved — ' + jobData.company, 'success');
+        captured = false;
       });
     });
   }
 
   function showNotification(message, type) {
-    // Remove existing notification
     const existing = document.getElementById('appliedin-notification');
     if (existing) existing.remove();
 
-    const notification = document.createElement('div');
-    notification.id = 'appliedin-notification';
-    notification.style.cssText = `
+    const n = document.createElement('div');
+    n.id = 'appliedin-notification';
+    n.style.cssText = `
       position: fixed;
       bottom: 24px;
       right: 24px;
@@ -83,46 +79,77 @@
       background: ${type === 'success' ? '#22c55e' : '#f59e0b'};
       color: white;
     `;
-    notification.innerText = message;
-    document.body.appendChild(notification);
+    n.innerText = message;
+    document.body.appendChild(n);
 
     setTimeout(() => {
-      notification.style.opacity = '0';
-      setTimeout(() => notification.remove(), 300);
+      n.style.opacity = '0';
+      setTimeout(() => n.remove(), 300);
     }, 3000);
   }
 
-  function watchForApplyButton() {
-    document.addEventListener('click', function (e) {
-      const button = e.target.closest('button');
-      if (!button) return;
+  // METHOD 1 — Detect final "Submit application" button click
+  document.addEventListener('click', function (e) {
+    const button = e.target.closest('button');
+    if (!button) return;
 
-      const buttonText = button.innerText?.trim().toLowerCase();
+    const text = button.innerText?.trim().toLowerCase();
 
-      // Detect Easy Apply button click
-      if (
-        buttonText.includes('easy apply') ||
-        buttonText.includes('apply now') ||
-        buttonText.includes('submit application')
-      ) {
-        // Wait briefly for any modal or confirmation to appear
-        clearTimeout(captureTimeout);
-        captureTimeout = setTimeout(() => {
-          const currentUrl = window.location.href;
+    // Only capture on FINAL submit — not on "Easy Apply" or "Next"
+    if (
+      text === 'submit application' ||
+      text === 'submit' ||
+      text === 'done'
+    ) {
+      if (captured) return;
+      captured = true;
 
-          // Avoid double capture for same job
-          if (currentUrl === lastCapturedUrl) return;
-          lastCapturedUrl = currentUrl;
+      setTimeout(() => {
+        const jobData = getJobDetails();
+        if (jobData && jobData.company !== 'Unknown Company') {
+          saveApplication(jobData);
+        } else {
+          captured = false;
+        }
+      }, 2000);
+    }
+  });
 
-          const jobData = getJobDetails();
-          if (jobData && jobData.company !== 'Unknown Company') {
-            saveApplication(jobData);
-          }
-        }, 1500);
-      }
-    });
-  }
+  // METHOD 2 — Watch for success confirmation message in DOM
+  const observer = new MutationObserver(function () {
+    if (captured) return;
 
-  // Start watching
-  watchForApplyButton();
+    const bodyText = document.body.innerText || '';
+
+    const successPhrases = [
+      'your application was sent',
+      'application submitted',
+      'you\'ve applied',
+      'application was sent to',
+      'successfully applied'
+    ];
+
+    const found = successPhrases.some(phrase =>
+      bodyText.toLowerCase().includes(phrase)
+    );
+
+    if (found) {
+      captured = true;
+      setTimeout(() => {
+        const jobData = getJobDetails();
+        if (jobData && jobData.company !== 'Unknown Company') {
+          saveApplication(jobData);
+        } else {
+          captured = false;
+        }
+      }, 1000);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+
 })();

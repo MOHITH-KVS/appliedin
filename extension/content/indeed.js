@@ -1,35 +1,31 @@
 // AppliedIn - Indeed Content Script
-// Watches for Apply button clicks and captures job details
+// Captures ONLY on submission confirmation
 
 (function () {
-  let lastCapturedUrl = '';
-  let captureTimeout = null;
+  let captured = false;
 
   function getJobDetails() {
     try {
       const title =
         document.querySelector('.jobsearch-JobInfoHeader-title')?.innerText?.trim() ||
-        document.querySelector('h1.icl-u-xs-mb--xs')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
         'Unknown Role';
 
       const company =
         document.querySelector('[data-company-name="true"]')?.innerText?.trim() ||
-        document.querySelector('.jobsearch-InlineCompanyRating-companyName')?.innerText?.trim() ||
         document.querySelector('[class*="companyName"]')?.innerText?.trim() ||
         'Unknown Company';
 
       const location =
         document.querySelector('[data-testid="job-location"]')?.innerText?.trim() ||
-        document.querySelector('.jobsearch-JobInfoHeader-subtitle div')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
 
       return {
-        company: company,
+        company,
         role: title,
-        location: location,
+        location,
         platform: 'Indeed',
         url: window.location.href,
         date: new Date().toISOString(),
@@ -44,7 +40,6 @@
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
-      // Duplicate check — same company + role within 24 hours
       const isDuplicate = applications.some(app =>
         app.company.toLowerCase() === jobData.company.toLowerCase() &&
         app.role.toLowerCase() === jobData.role.toLowerCase() &&
@@ -59,6 +54,7 @@
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
         showNotification('✅ Application saved — ' + jobData.company, 'success');
+        captured = false;
       });
     });
   }
@@ -67,9 +63,9 @@
     const existing = document.getElementById('appliedin-notification');
     if (existing) existing.remove();
 
-    const notification = document.createElement('div');
-    notification.id = 'appliedin-notification';
-    notification.style.cssText = `
+    const n = document.createElement('div');
+    n.id = 'appliedin-notification';
+    n.style.cssText = `
       position: fixed;
       bottom: 24px;
       right: 24px;
@@ -84,48 +80,79 @@
       background: ${type === 'success' ? '#22c55e' : '#f59e0b'};
       color: white;
     `;
-    notification.innerText = message;
-    document.body.appendChild(notification);
+    n.innerText = message;
+    document.body.appendChild(n);
 
     setTimeout(() => {
-      notification.style.opacity = '0';
-      setTimeout(() => notification.remove(), 300);
+      n.style.opacity = '0';
+      setTimeout(() => n.remove(), 300);
     }, 3000);
   }
 
-  function watchForApplyButton() {
-    document.addEventListener('click', function (e) {
-      const button = e.target.closest('button, a');
-      if (!button) return;
+  // METHOD 1 — Final submit button
+  document.addEventListener('click', function (e) {
+    const button = e.target.closest('button');
+    if (!button) return;
 
-      const buttonText = button.innerText?.trim().toLowerCase();
-      const buttonId = button.id?.toLowerCase() || '';
-      const buttonClass = button.className?.toLowerCase() || '';
+    const text = button.innerText?.trim().toLowerCase();
 
-      // Indeed specific apply button detection
-      if (
-        buttonText.includes('apply now') ||
-        buttonText.includes('easy apply') ||
-        buttonText.includes('apply') ||
-        buttonId.includes('indeedApplyButton') ||
-        buttonClass.includes('indeed-apply-button') ||
-        buttonClass.includes('jobsearch-IndeedApplyButton')
-      ) {
-        clearTimeout(captureTimeout);
-        captureTimeout = setTimeout(() => {
-          const currentUrl = window.location.href;
-          if (currentUrl === lastCapturedUrl) return;
-          lastCapturedUrl = currentUrl;
+    if (
+      text === 'submit' ||
+      text === 'submit your application' ||
+      text === 'submit application' ||
+      text === 'continue' ||
+      text === 'apply'
+    ) {
+      if (captured) return;
+      captured = true;
 
-          const jobData = getJobDetails();
-          if (jobData && jobData.company !== 'Unknown Company') {
-            saveApplication(jobData);
-          }
-        }, 1500);
-      }
-    });
-  }
+      setTimeout(() => {
+        const jobData = getJobDetails();
+        if (jobData && jobData.company !== 'Unknown Company') {
+          saveApplication(jobData);
+        } else {
+          captured = false;
+        }
+      }, 2000);
+    }
+  });
 
-  // Start watching
-  watchForApplyButton();
+  // METHOD 2 — Watch for success message
+  const observer = new MutationObserver(function () {
+    if (captured) return;
+
+    const bodyText = document.body.innerText || '';
+
+    const successPhrases = [
+      'your application was sent',
+      'application submitted',
+      'you\'ve applied',
+      'successfully applied',
+      'your resume was sent',
+      'application complete'
+    ];
+
+    const found = successPhrases.some(phrase =>
+      bodyText.toLowerCase().includes(phrase)
+    );
+
+    if (found) {
+      captured = true;
+      setTimeout(() => {
+        const jobData = getJobDetails();
+        if (jobData && jobData.company !== 'Unknown Company') {
+          saveApplication(jobData);
+        } else {
+          captured = false;
+        }
+      }, 1000);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+
 })();

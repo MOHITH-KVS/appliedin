@@ -1,5 +1,5 @@
 // AppliedIn - Background Service Worker
-// Handles company website redirects and universal apply detection
+// Handles ALL websites universally — captures on confirmation only
 
 // Platform name detector from URL
 function detectPlatform(url) {
@@ -31,44 +31,45 @@ function detectPlatform(url) {
       'updazz.com': 'Updazz',
       'placementindia.com': 'PlacementIndia',
       'timesjobs.com': 'TimesJobs',
-      'careesma.in': 'Careesma',
       'workindia.in': 'WorkIndia',
       'jobhai.com': 'JobHai',
-      'careerjet.co.in': 'CareerJet',
       'quikr.com': 'Quikr Jobs',
-      'olx.in': 'OLX Jobs',
+      'workday.com': 'Company Website',
+      'greenhouse.io': 'Company Website',
+      'lever.co': 'Company Website',
+      'smartrecruiters.com': 'Company Website',
+      'taleo.net': 'Company Website',
+      'icims.com': 'Company Website',
+      'successfactors.com': 'Company Website',
+      'myworkdayjobs.com': 'Company Website',
+      'careers.google.com': 'Google Careers',
+      'amazon.jobs': 'Amazon Jobs',
+      'infosys.com': 'Infosys',
+      'tcs.com': 'TCS',
+      'wipro.com': 'Wipro',
+      'hcltech.com': 'HCL',
+      'cognizant.com': 'Cognizant',
+      'accenture.com': 'Accenture',
+      'capgemini.com': 'Capgemini',
+      'deloitte.com': 'Deloitte',
+      'ibm.com': 'IBM',
+      'microsoft.com': 'Microsoft',
     };
 
     for (const [domain, name] of Object.entries(platforms)) {
       if (hostname.includes(domain)) return name;
     }
 
-    // Unknown portal — extract domain name and capitalize
+    // Unknown portal — extract and capitalize domain name
     const parts = hostname.replace('www.', '').split('.');
     return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
 
   } catch (e) {
-    return 'Unknown Portal';
+    return 'Company Website';
   }
 }
 
-// Listen for messages from content scripts
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'SHOW_CONFIRM_POPUP') {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          type: 'SHOW_CONFIRM_POPUP',
-          data: message.data
-        });
-      }
-    });
-  }
-  sendResponse({ status: 'ok' });
-  return true;
-});
-
-// Watch all tabs for URL changes (company website redirects)
+// Watch all tabs for URL changes
 chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   if (changeInfo.status !== 'complete') return;
   if (!tab.url) return;
@@ -97,96 +98,84 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   const isCovered = coveredPortals.some(portal => url.includes(portal));
   if (isCovered) return;
 
-  // Check if this looks like a job application page
+  // Check if this looks like a job related page
   const jobKeywords = [
     'career', 'careers', 'jobs', 'job', 'apply',
     'application', 'hiring', 'vacancy', 'vacancies',
     'opening', 'openings', 'recruitment', 'work-with-us',
-    'join-us', 'join-our-team', 'opportunities'
+    'join-us', 'join-our-team', 'opportunities', 'workday',
+    'greenhouse', 'lever', 'taleo', 'icims', 'smartrecruiters'
   ];
 
   const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
   if (!isJobPage) return;
 
-  // Inject universal content script into this page
+  // Inject universal tracker into this page
   chrome.scripting.executeScript({
     target: { tabId: tabId },
     func: injectUniversalTracker,
     args: [detectPlatform(tab.url)]
   }).catch(() => {
-    // Silently fail if injection not allowed
+    // Silently fail if page doesn't allow injection
   });
 });
 
-// Universal tracker injected into any job page
+// Universal tracker — injected into any job page
+// Captures ONLY on confirmation — not on first click
 function injectUniversalTracker(platformName) {
-  // Don't inject twice
   if (window.__appliedinInjected) return;
   window.__appliedinInjected = true;
 
-  // All possible apply button texts
-  const applyTexts = [
-    'apply now',
-    'apply',
-    'easy apply',
-    'quick apply',
-    'apply for this job',
-    'apply for this role',
-    'apply for this position',
+  let captured = false;
+
+  // All final submit button texts
+  const submitTexts = [
     'submit application',
+    'submit your application',
     'submit',
-    'register',
-    'register now',
-    'participate',
-    'apply for internship',
-    'apply for job',
-    'one click apply',
-    'instant apply',
-    'apply with linkedin',
-    'apply with naukri',
-    'apply with resume',
-    'apply with profile',
-    'express apply',
-    'fast apply',
-    'apply in seconds',
-    'apply online',
-    'apply here',
-    'apply today',
-    'apply for this opening',
-    'apply for this vacancy',
     'send application',
-    'send my application',
-    'continue to apply',
-    'proceed to apply',
+    'confirm application',
     'complete application',
     'finish application',
-    'confirm application'
+    'confirm',
+    'done',
+    'proceed',
+    'send my application',
+    'apply now',
+    'apply',
+    'register now',
+    'register',
+    'participate',
+    'confirm registration',
+    'complete registration'
   ];
 
-  let lastShownUrl = '';
+  // Success confirmation phrases
+  const successPhrases = [
+    'application submitted',
+    'application received',
+    'application complete',
+    'successfully applied',
+    'successfully submitted',
+    'your application has been sent',
+    'your application was sent',
+    'you have applied',
+    'you\'ve applied',
+    'thank you for applying',
+    'thank you for your application',
+    'we have received your application',
+    'your resume was sent',
+    'application sent successfully',
+    'registration successful',
+    'successfully registered',
+    'thank you for registering',
+    'participation confirmed',
+    'you have registered',
+    'application confirmation'
+  ];
 
-  document.addEventListener('click', function (e) {
-    const element = e.target.closest('button, a, input[type="submit"], input[type="button"]');
-    if (!element) return;
-
-    const text = (
-      element.innerText ||
-      element.value ||
-      element.getAttribute('aria-label') ||
-      element.getAttribute('title') ||
-      ''
-    ).toLowerCase().trim();
-
-    const isApplyButton = applyTexts.some(applyText =>
-      text.includes(applyText)
-    );
-
-    if (!isApplyButton) return;
-    if (window.location.href === lastShownUrl) return;
-    lastShownUrl = window.location.href;
-
-    // Get job details from page
-    setTimeout(() => {
+  function getPageDetails() {
+    try {
       const title =
         document.querySelector('h1')?.innerText?.trim() ||
         document.querySelector('h2')?.innerText?.trim() ||
@@ -199,18 +188,120 @@ function injectUniversalTracker(platformName) {
         '';
 
       const company = companyMeta ||
-        new URL(window.location.href).hostname.replace('www.', '').split('.')[0] ||
+        new URL(window.location.href).hostname
+          .replace('www.', '')
+          .replace('careers.', '')
+          .replace('jobs.', '')
+          .split('.')[0] ||
         'Unknown Company';
 
-      // Show confirmation popup
-      showConfirmPopup(company, title, platformName);
-    }, 1500);
+      return {
+        company: company.charAt(0).toUpperCase() + company.slice(1),
+        role: title.substring(0, 100),
+        location: 'Unknown Location',
+        platform: platformName,
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveApplication(jobData) {
+    chrome.storage.local.get(['applications'], function (result) {
+      const applications = result.applications || [];
+
+      const isDuplicate = applications.some(app =>
+        app.company.toLowerCase() === jobData.company.toLowerCase() &&
+        app.role.toLowerCase() === jobData.role.toLowerCase() &&
+        (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
+      );
+
+      if (isDuplicate) {
+        showToast('⚠️ Already applied here recently!', '#f59e0b');
+        captured = false;
+        return;
+      }
+
+      applications.unshift(jobData);
+      chrome.storage.local.set({ applications }, function () {
+        showToast('✅ Application saved — ' + jobData.company, '#22c55e');
+        captured = false;
+      });
+    });
+  }
+
+  // METHOD 1 — Detect submit button click
+  // Shows confirmation popup to verify before saving
+  document.addEventListener('click', function (e) {
+    if (captured) return;
+
+    const element = e.target.closest('button, input[type="submit"], input[type="button"], a');
+    if (!element) return;
+
+    const text = (
+      element.innerText ||
+      element.value ||
+      element.getAttribute('aria-label') ||
+      element.getAttribute('title') ||
+      ''
+    ).toLowerCase().trim();
+
+    const isSubmitButton = submitTexts.some(t => text === t || text.includes(t));
+    if (!isSubmitButton) return;
+
+    captured = true;
+
+    // Wait for page to show confirmation
+    setTimeout(() => {
+      const bodyText = document.body.innerText || '';
+      const isConfirmed = successPhrases.some(phrase =>
+        bodyText.toLowerCase().includes(phrase)
+      );
+
+      if (isConfirmed) {
+        // Auto save — confirmation detected
+        const jobData = getPageDetails();
+        if (jobData) saveApplication(jobData);
+      } else {
+        // Show manual confirmation popup
+        showConfirmPopup();
+      }
+    }, 2000);
   });
 
-  function showConfirmPopup(company, role, platform) {
-    // Remove existing popup
+  // METHOD 2 — Watch DOM for success confirmation message
+  const observer = new MutationObserver(function () {
+    if (captured) return;
+
+    const bodyText = document.body.innerText || '';
+    const isConfirmed = successPhrases.some(phrase =>
+      bodyText.toLowerCase().includes(phrase)
+    );
+
+    if (isConfirmed) {
+      captured = true;
+      setTimeout(() => {
+        const jobData = getPageDetails();
+        if (jobData) saveApplication(jobData);
+      }, 1000);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+
+  // Confirmation popup — shown when auto detection is uncertain
+  function showConfirmPopup() {
     const existing = document.getElementById('appliedin-confirm');
     if (existing) existing.remove();
+
+    const jobData = getPageDetails();
 
     const popup = document.createElement('div');
     popup.id = 'appliedin-confirm';
@@ -229,87 +320,87 @@ function injectUniversalTracker(platformName) {
     `;
 
     popup.innerHTML = `
-      <div style="font-size:13px; font-weight:600; color:#111827; margin-bottom:4px;">
-        👋 AppliedIn
+      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:4px;">
+        📋 AppliedIn
       </div>
-      <div style="font-size:12px; color:#6b7280; margin-bottom:12px;">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">
         Did you complete this application?
       </div>
       <div style="margin-bottom:12px;">
-        <input id="appliedin-company" value="${company}" placeholder="Company name"
-          style="width:100%; box-sizing:border-box; padding:6px 10px; border:1px solid #e5e7eb;
-          border-radius:6px; font-size:12px; margin-bottom:6px; color:#111827;" />
-        <input id="appliedin-role" value="${role.substring(0, 60)}" placeholder="Job role"
-          style="width:100%; box-sizing:border-box; padding:6px 10px; border:1px solid #e5e7eb;
-          border-radius:6px; font-size:12px; color:#111827;" />
+        <input id="appliedin-company"
+          value="${jobData?.company || ''}"
+          placeholder="Company name"
+          style="width:100%;box-sizing:border-box;padding:6px 10px;
+          border:1px solid #e5e7eb;border-radius:6px;font-size:12px;
+          margin-bottom:6px;color:#111827;outline:none;" />
+        <input id="appliedin-role"
+          value="${jobData?.role?.substring(0, 60) || ''}"
+          placeholder="Job role"
+          style="width:100%;box-sizing:border-box;padding:6px 10px;
+          border:1px solid #e5e7eb;border-radius:6px;font-size:12px;
+          color:#111827;outline:none;" />
       </div>
-      <div style="display:flex; gap:8px;">
-        <button id="appliedin-yes" style="flex:1; padding:8px; background:#22c55e; color:white;
-          border:none; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer;">
-          ✅ Yes, Save it
+      <div style="display:flex;gap:8px;">
+        <button id="appliedin-yes"
+          style="flex:1;padding:8px;background:#22c55e;color:white;
+          border:none;border-radius:6px;font-size:12px;
+          font-weight:500;cursor:pointer;">
+          ✅ Yes, Save
         </button>
-        <button id="appliedin-no" style="flex:1; padding:8px; background:#f3f4f6; color:#374151;
-          border:none; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer;">
-          ❌ Skip
+        <button id="appliedin-no"
+          style="flex:1;padding:8px;background:#f3f4f6;color:#374151;
+          border:none;border-radius:6px;font-size:12px;
+          font-weight:500;cursor:pointer;">
+          ❌ No
         </button>
       </div>
     `;
 
     document.body.appendChild(popup);
 
-    // Yes button
     document.getElementById('appliedin-yes').addEventListener('click', function () {
       const finalCompany = document.getElementById('appliedin-company').value.trim();
       const finalRole = document.getElementById('appliedin-role').value.trim();
 
-      const jobData = {
-        company: finalCompany || company,
-        role: finalRole || role,
+      if (!finalCompany || !finalRole) {
+        alert('Please enter company and role.');
+        return;
+      }
+
+      const finalData = {
+        company: finalCompany,
+        role: finalRole,
         location: 'Unknown Location',
-        platform: platform,
+        platform: platformName,
         url: window.location.href,
         date: new Date().toISOString(),
         status: 'Applied'
       };
 
-      chrome.storage.local.get(['applications'], function (result) {
-        const applications = result.applications || [];
-
-        const isDuplicate = applications.some(app =>
-          app.company.toLowerCase() === jobData.company.toLowerCase() &&
-          app.role.toLowerCase() === jobData.role.toLowerCase() &&
-          (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-        );
-
-        if (isDuplicate) {
-          popup.remove();
-          showToast('⚠️ Already applied here recently!', '#f59e0b');
-          return;
-        }
-
-        applications.unshift(jobData);
-        chrome.storage.local.set({ applications }, function () {
-          popup.remove();
-          showToast('✅ Application saved — ' + jobData.company, '#22c55e');
-        });
-      });
+      popup.remove();
+      saveApplication(finalData);
     });
 
-    // No button
     document.getElementById('appliedin-no').addEventListener('click', function () {
       popup.remove();
+      captured = false;
     });
 
-    // Auto dismiss after 15 seconds
+    // Auto dismiss after 20 seconds
     setTimeout(() => {
       if (document.getElementById('appliedin-confirm')) {
         popup.remove();
+        captured = false;
       }
-    }, 15000);
+    }, 20000);
   }
 
   function showToast(message, color) {
+    const existing = document.getElementById('appliedin-toast');
+    if (existing) existing.remove();
+
     const toast = document.createElement('div');
+    toast.id = 'appliedin-toast';
     toast.style.cssText = `
       position: fixed;
       bottom: 24px;
@@ -323,13 +414,13 @@ function injectUniversalTracker(platformName) {
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       background: ${color};
       color: white;
+      transition: opacity 0.3s ease;
     `;
     toast.innerText = message;
     document.body.appendChild(toast);
 
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s ease';
       setTimeout(() => toast.remove(), 300);
     }, 3000);
   }
