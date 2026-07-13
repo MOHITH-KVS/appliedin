@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AppliedIn — Free Job Application Tracker for Indian Freshers | Chrome Extension</title>
+  <meta name="description" content="Auto-track every job application from LinkedIn, Naukri, Internshala, Indeed, Glassdoor and Unstop. Never forget where you applied. Free Chrome extension built for Indian freshers." />
+
+  <!-- ── SEO META TAGS ── -->
+  <meta name="keywords" content="job application tracker, job tracker India, naukri tracker, linkedin application tracker, internshala tracker, chrome extension job tracker, fresher job tracker India, job application organizer, track job applications India, applied jobs tracker, job search tracker India, free job tracker, job portal tracker India" />
+  <meta name="author" content="K.V.S. Mohith" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="googlebot" content="index, follow" />
+  <meta name="theme-color" content="#1A56FF" />
+  <link rel="canonical" href="https://appliedin.vercel.app/" />
+
+  <!-- ── OPEN GRAPH (Facebook, WhatsApp, LinkedIn) ── -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://appliedin.vercel.app/" />
+  <meta property="og:title" content="AppliedIn — Free Job Application Tracker for Indian Freshers" />
+  <meta property="og:description" content="Auto-track every job application from LinkedIn, Naukri, Internshala and more. Never forget where you applied. Free Chrome extension." />
+  <meta property="og:image" content="https://appliedin.vercel.app/icons/icon128.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:site_name" content="AppliedIn" />
+  <meta property="og:locale" content="en_IN" />
+
+  <!-- ── TWITTER CARD ── -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://appliedin.vercel.app/" />
+  <meta name="twitter:title" content="AppliedIn — Free Job Application Tracker for Indian Freshers" />
+  <meta name="twitter:description" content="Auto-track every job application from LinkedIn, Naukri, Internshala and more. Never forget where you applied. Free Chrome extension." />
+  <meta name="twitter:image" content="https://appliedin.vercel.app/icons/icon128.png" />
+
+  <!-- ── SCHEMA MARKUP (Google Rich Results) ── -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "AppliedIn",
+    "applicationCategory": "ProductivityApplication",
+    "operatingSystem": "Chrome, Edge, Brave",
+    "description": "Auto-track every job application from LinkedIn, Naukri, Internshala, Indeed, Glassdoor and Unstop. Free Chrome extension built for Indian freshers.",
+    "url": "https://appliedin.vercel.app/",
+    "downloadUrl": "https://github.com/MOHITH-KVS/appliedin",
+    "softwareVersion": "1.0.0",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "INR"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "K.V.S. Mohith",
+      "url": "https://github.com/MOHITH-KVS"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": "5",
+      "ratingCount": "1"
+    },
+    "featureList": [
+      "Auto-track job applications from LinkedIn",
+      "Auto-track job applications from Naukri",
+      "Auto-track job applications from Internshala",
+      "Auto-track job applications from Indeed",
+      "Auto-track job applications from Glassdoor",
+      "Auto-track job applications from Unstop",
+      "Export to Excel and CSV",
+      "Duplicate detection",
+      "Status tracking",
+      "100% private — data stays on device"
+    ]
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Is AppliedIn free?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes, AppliedIn is completely free forever. No subscription, no premium plan, no hidden charges."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Which job portals does AppliedIn support?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "AppliedIn supports LinkedIn, Naukri, Internshala, Indeed, Glassdoor, Unstop, and any other company career website automatically."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is my data safe with AppliedIn?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. All your job application data is stored only on your own device using Chrome local storage. No data is sent to any server. Nobody else can see your applications."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I install AppliedIn?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Download the ZIP from GitHub, open chrome://extensions in your browser, enable Developer Mode, click Load Unpacked, and select the extension folder. Done in under 2 minutes."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does AppliedIn work on Naukri and Internshala?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. AppliedIn automatically tracks job applications on Naukri, Internshala, LinkedIn, Indeed, Glassdoor, and Unstop. It also works on company career websites like TCS, Infosys, Wipro, and more."
+        }
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue: #1A56FF;
+      --blue-dark: #1240CC;
+      --blue-light: #EEF2FF;
+      --green: #16A34A;
+      --green-light: #F0FDF4;
+      --dark: #0A0F1E;
+      --dark-2: #1C2340;
+      --gray: #64748B;
+      --gray-light: #F8FAFC;
+      --border: #E2E8F0;
+      --white: #FFFFFF;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--white);
+      color: var(--dark);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .nav-logo img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
+
+    .nav-logo span {
+      font-family: 'Syne', sans-serif;
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--dark);
+    }
+
+    .nav-logo span em {
+      color: var(--blue);
+      font-style: normal;
+    }
+
+    .nav-cta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .nav-link {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--gray);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .nav-link:hover { color: var(--dark); }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--blue);
+      color: var(--white);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 10px;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.1s;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover {
+      background: var(--blue-dark);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--white);
+      color: var(--dark);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 10px;
+      text-decoration: none;
+      border: 1.5px solid var(--border);
+      transition: border-color 0.2s, transform 0.1s;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--blue);
+      transform: translateY(-1px);
+    }
+
+    /* ── HERO ── */
+    .hero {
+      padding: 140px 24px 80px;
+      text-align: center;
+      max-width: 860px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--blue-light);
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 20px;
+      margin-bottom: 28px;
+      border: 1px solid #C7D7FF;
+    }
+
+    .hero h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(36px, 6vw, 64px);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -1.5px;
+      color: var(--dark);
+      margin-bottom: 24px;
+    }
+
+    .hero h1 .highlight {
+      color: var(--blue);
+      position: relative;
+      display: inline-block;
+    }
+
+    .hero h1 .highlight::after {
+      content: '';
+      position: absolute;
+      bottom: 4px;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--blue);
+      opacity: 0.2;
+      border-radius: 2px;
+    }
+
+    .hero p {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--gray);
+      max-width: 580px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+
+    .hero-buttons {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 60px;
+    }
+
+    .hero-buttons .btn-primary {
+      font-size: 16px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(26, 86, 255, 0.3);
+    }
+
+    .hero-buttons .btn-secondary {
+      font-size: 16px;
+      padding: 14px 28px;
+      border-radius: 12px;
+    }
+
+    /* ── STATS ── */
+    .hero-stats {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      flex-wrap: wrap;
+    }
+
+    .stat-item {
+      text-align: center;
+    }
+
+    .stat-number {
+      font-family: 'Syne', sans-serif;
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--dark);
+      display: block;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: var(--gray);
+    }
+
+    .stat-divider {
+      width: 1px;
+      height: 36px;
+      background: var(--border);
+    }
+
+    /* ── PREVIEW ── */
+    .preview-section {
+      padding: 0 24px 80px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .preview-wrapper {
+      background: linear-gradient(135deg, #1A56FF 0%, #6366F1 100%);
+      border-radius: 24px;
+      padding: 40px 40px 0;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(26, 86, 255, 0.25);
+    }
+
+    .preview-wrapper::before {
+      content: '';
+      position: absolute;
+      top: -40px;
+      right: -40px;
+      width: 200px;
+      height: 200px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 50%;
+    }
+
+    .preview-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 20px;
+    }
+
+    /* Extension popup mockup */
+    .popup-mockup {
+      background: white;
+      border-radius: 16px 16px 0 0;
+      width: 360px;
+      margin: 0 auto;
+      box-shadow: 0 -8px 40px rgba(0,0,0,0.2);
+      overflow: hidden;
+    }
+
+    .popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .popup-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .popup-total {
+      font-size: 11px;
+      background: #f3f4f6;
+      padding: 3px 8px;
+      border-radius: 20px;
+      color: #6b7280;
+      font-weight: 500;
+    }
+
+    .popup-stats {
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 16px;
+      background: #fafafa;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .ps-item { text-align: center; }
+    .ps-value { font-size: 18px; font-weight: 800; color: #1A56FF; display: block; }
+    .ps-label { font-size: 10px; color: #9ca3af; }
+    .ps-div { width: 1px; background: #e5e7eb; }
+
+    .popup-search {
+      padding: 10px 16px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .popup-search-bar {
+      width: 100%;
+      padding: 8px 12px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #9ca3af;
+    }
+
+    .popup-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      border-bottom: 1px solid #f3f4f6;
+      overflow: hidden;
+    }
+
+    .ptab {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      background: white;
+      border: 1px solid #e5e7eb;
+      color: #6b7280;
+      white-space: nowrap;
+    }
+
+    .ptab.active {
+      background: #1A56FF;
+      color: white;
+      border-color: #1A56FF;
+    }
+
+    .popup-list { padding: 8px 16px; display: flex; flex-direction: column; gap: 8px; }
+
+    .pcard {
+      background: #f9fafb;
+      border: 1px solid #f3f4f6;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+
+    .pcard-top { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .pcard-company { font-size: 13px; font-weight: 600; }
+    .pcard-role { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+    .pcard-bottom { display: flex; justify-content: space-between; align-items: center; }
+    .pcard-meta { font-size: 11px; color: #9ca3af; }
+
+    .pbadge {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+
+    .pb-applied { background: #eff6ff; color: #3b82f6; }
+    .pb-interview { background: #f5f3ff; color: #8b5cf6; }
+    .pb-shortlisted { background: #f0fdf4; color: #22c55e; }
+    .pb-rejected { background: #fef2f2; color: #ef4444; }
+
+    .popup-bottom {
+      display: flex;
+      gap: 8px;
+      padding: 10px 16px;
+      border-top: 1px solid #f3f4f6;
+    }
+
+    .pb-add {
+      flex: 1;
+      padding: 8px;
+      background: #1A56FF;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .pb-csv {
+      padding: 8px 14px;
+      background: #f3f4f6;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    .pb-excel {
+      padding: 8px 14px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #16a34a;
+    }
+
+    /* ── PORTALS ── */
+    .portals-section {
+      padding: 20px 24px 80px;
+      text-align: center;
+    }
+
+    .portals-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--gray);
+      margin-bottom: 20px;
+    }
+
+    .portals-grid {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .portal-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 40px;
+      border: 1.5px solid var(--border);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--dark);
+      background: var(--white);
+      transition: border-color 0.2s, transform 0.15s;
+    }
+
+    .portal-chip:hover {
+      border-color: var(--blue);
+      transform: translateY(-2px);
+    }
+
+    .portal-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    /* ── HOW IT WORKS ── */
+    .how-section {
+      padding: 80px 24px;
+      background: var(--gray-light);
+    }
+
+    .section-label {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--blue);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      text-align: center;
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800;
+      color: var(--dark);
+      margin-bottom: 16px;
+      letter-spacing: -0.5px;
+    }
+
+    .section-subtitle {
+      text-align: center;
+      font-size: 16px;
+      color: var(--gray);
+      max-width: 500px;
+      margin: 0 auto 60px;
+    }
+
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .step-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 24px;
+      position: relative;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .step-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+    }
+
+    .step-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--blue-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+
+    .step-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--dark);
+      margin-bottom: 8px;
+    }
+
+    .step-desc {
+      font-size: 14px;
+      color: var(--gray);
+      line-height: 1.6;
+    }
+
+    /* ── FEATURES ── */
+    .features-section {
+      padding: 80px 24px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--blue);
+      transform: translateY(-3px);
+    }
+
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .feature-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--dark);
+      margin-bottom: 6px;
+    }
+
+    .feature-desc {
+      font-size: 13px;
+      color: var(--gray);
+      line-height: 1.6;
+    }
+
+    /* ── MOMENT ── */
+    .moment-section {
+      padding: 80px 24px;
+      background: var(--dark);
+      text-align: center;
+    }
+
+    .moment-section .section-title {
+      color: var(--white);
+    }
+
+    .moment-section .section-subtitle {
+      color: rgba(255,255,255,0.6);
+    }
+
+    .moment-card {
+      max-width: 480px;
+      margin: 0 auto;
+      background: var(--dark-2);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 28px;
+      text-align: left;
+    }
+
+    .moment-scenario {
+      font-size: 13px;
+      color: rgba(255,255,255,0.4);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 16px;
+    }
+
+    .moment-call {
+      background: rgba(26,86,255,0.15);
+      border: 1px solid rgba(26,86,255,0.3);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .call-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .call-text {
+      font-size: 14px;
+      color: var(--white);
+      font-weight: 500;
+    }
+
+    .call-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 2px;
+    }
+
+    .moment-result {
+      background: rgba(22,163,74,0.1);
+      border: 1px solid rgba(22,163,74,0.3);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .result-icon {
+      font-size: 24px;
+    }
+
+    .result-text {
+      font-size: 14px;
+      color: rgba(255,255,255,0.9);
+      font-weight: 500;
+    }
+
+    .result-detail {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 2px;
+    }
+
+    /* ── INSTALL ── */
+    .install-section {
+      padding: 80px 24px;
+      text-align: center;
+      background: var(--blue-light);
+    }
+
+    .install-steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 40px 0;
+    }
+
+    .install-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--dark);
+    }
+
+    .install-step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .install-arrow {
+      font-size: 18px;
+      color: var(--gray);
+    }
+
+    .install-note {
+      font-size: 13px;
+      color: var(--gray);
+      margin-top: 16px;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: gap;
+      gap: 16px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--dark);
+      text-decoration: none;
+    }
+
+    .footer-logo img {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+    }
+
+    .footer-text {
+      font-size: 13px;
+      color: var(--gray);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+    }
+
+    .footer-link {
+      font-size: 13px;
+      color: var(--gray);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-link:hover { color: var(--blue); }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-up {
+      animation: fadeUp 0.6s ease forwards;
+    }
+
+    .fade-up-delay-1 { animation-delay: 0.1s; opacity: 0; }
+    .fade-up-delay-2 { animation-delay: 0.2s; opacity: 0; }
+    .fade-up-delay-3 { animation-delay: 0.3s; opacity: 0; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 600px) {
+      nav { padding: 0 16px; }
+      .nav-link { display: none; }
+      .hero { padding: 100px 16px 60px; }
+      .preview-wrapper { padding: 24px 20px 0; border-radius: 16px; }
+      .popup-mockup { width: 100%; }
+      .install-steps { flex-direction: column; }
+      .install-arrow { transform: rotate(90deg); }
+      footer { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <a href="#" class="nav-logo">
+      <img src="icons/icon128.png" alt="AppliedIn logo" />
+      <span>Applied<em>In</em></span>
+    </a>
+    <div class="nav-cta">
+      <a href="#how" class="nav-link">How it works</a>
+      <a href="#features" class="nav-link">Features</a>
+      <a href="https://github.com/MOHITH-KVS/appliedin" target="_blank" class="btn-secondary">
+        ⭐ GitHub
+      </a>
+      <a href="https://github.com/MOHITH-KVS/appliedin" target="_blank" class="btn-primary">
+        ⬇ Install Free
+      </a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-badge fade-up">
+      🇮🇳 Built for Indian Freshers
+    </div>
+    <h1 class="fade-up fade-up-delay-1">
+      Never forget<br/>where you <span class="highlight">applied</span>
+    </h1>
+    <p class="fade-up fade-up-delay-2">
+      Auto-track every job application from LinkedIn, Naukri, Internshala and more.
+      When a company calls — know exactly what you applied for, in under 5 seconds.
+    </p>
+    <div class="hero-buttons fade-up fade-up-delay-3">
+      <a href="https://github.com/MOHITH-KVS/appliedin" target="_blank" class="btn-primary">
+        ⬇ Add to Chrome — Free
+      </a>
+      <a href="#how" class="btn-secondary">
+        See how it works
+      </a>
+    </div>
+    <div class="hero-stats fade-up fade-up-delay-3">
+      <div class="stat-item">
+        <span class="stat-number">6+</span>
+        <span class="stat-label">Job portals covered</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-number">0₹</span>
+        <span class="stat-label">Free forever</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-number">100%</span>
+        <span class="stat-label">Data stays on your device</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PREVIEW -->
+  <section class="preview-section">
+    <div class="preview-wrapper">
+      <div class="preview-label">Extension Preview</div>
+      <div class="popup-mockup">
+        <div class="popup-header">
+          <div class="popup-logo">📋 AppliedIn</div>
+          <span class="popup-total">47 Total</span>
+        </div>
+        <div class="popup-stats">
+          <div class="ps-item"><span class="ps-value">8</span><span class="ps-label">Today</span></div>
+          <div class="ps-div"></div>
+          <div class="ps-item"><span class="ps-value">5</span><span class="ps-label">Yesterday</span></div>
+          <div class="ps-div"></div>
+          <div class="ps-item"><span class="ps-value">31</span><span class="ps-label">This Week</span></div>
+          <div class="ps-div"></div>
+          <div class="ps-item"><span class="ps-value">47</span><span class="ps-label">This Month</span></div>
+        </div>
+        <div class="popup-search">
+          <div class="popup-search-bar">🔍 Search company or role...</div>
+        </div>
+        <div class="popup-tabs">
+          <div class="ptab active">All</div>
+          <div class="ptab">Applied</div>
+          <div class="ptab">Interview</div>
+          <div class="ptab">Shortlisted</div>
+          <div class="ptab">Rejected</div>
+        </div>
+        <div class="popup-list">
+          <div class="pcard">
+            <div class="pcard-top">
+              <div class="pcard-company">Infosys</div>
+            </div>
+            <div class="pcard-role">Software Developer · LinkedIn</div>
+            <div class="pcard-bottom">
+              <div class="pcard-meta">8 days ago</div>
+              <span class="pbadge pb-shortlisted">Shortlisted</span>
+            </div>
+          </div>
+          <div class="pcard">
+            <div class="pcard-top">
+              <div class="pcard-company">TCS</div>
+            </div>
+            <div class="pcard-role">ML Engineer · Naukri</div>
+            <div class="pcard-bottom">
+              <div class="pcard-meta">3 days ago</div>
+              <span class="pbadge pb-interview">Interview</span>
+            </div>
+          </div>
+          <div class="pcard">
+            <div class="pcard-top">
+              <div class="pcard-company">Wipro</div>
+            </div>
+            <div class="pcard-role">AI Developer · Internshala</div>
+            <div class="pcard-bottom">
+              <div class="pcard-meta">Today</div>
+              <span class="pbadge pb-applied">Applied</span>
+            </div>
+          </div>
+        </div>
+        <div class="popup-bottom">
+          <button class="pb-add">+ Add Manually</button>
+          <button class="pb-csv">⬇ CSV</button>
+          <button class="pb-excel">📊 Excel</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PORTALS -->
+  <section class="portals-section">
+    <p class="portals-label">Works automatically on all major Indian job portals</p>
+    <div class="portals-grid">
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#0077B5;"></div>
+        LinkedIn
+      </div>
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#FF7555;"></div>
+        Naukri
+      </div>
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#1D9E75;"></div>
+        Internshala
+      </div>
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#2557A7;"></div>
+        Indeed
+      </div>
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#0CAA41;"></div>
+        Glassdoor
+      </div>
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#F97316;"></div>
+        Unstop
+      </div>
+      <div class="portal-chip">
+        <div class="portal-dot" style="background:#64748B;"></div>
+        + Any website
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how-section" id="how">
+    <div class="section-label">How it works</div>
+    <h2 class="section-title">Three steps. Zero effort.</h2>
+    <p class="section-subtitle">Install once. Apply normally. AppliedIn handles the rest silently in the background.</p>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-icon">⬇</div>
+        <div class="step-title">Install the extension</div>
+        <div class="step-desc">Add AppliedIn to Chrome in one click. Free. No account needed. No signup form.</div>
+      </div>
+      <div class="step-card">
+        <div class="step-icon">✅</div>
+        <div class="step-title">Apply for jobs normally</div>
+        <div class="step-desc">Browse LinkedIn, Naukri, Internshala as usual. The moment you submit — AppliedIn captures it automatically.</div>
+      </div>
+      <div class="step-card">
+        <div class="step-icon">📋</div>
+        <div class="step-title">Find any application instantly</div>
+        <div class="step-desc">Company calls? Open extension. Search their name. See exactly when you applied, for which role, on which portal.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE MOMENT -->
+  <section class="moment-section">
+    <div class="section-label" style="color:rgba(255,255,255,0.4);">The problem we solve</div>
+    <h2 class="section-title">That panic moment — solved.</h2>
+    <p class="section-subtitle">You applied to 15 jobs yesterday. An unknown number is calling. Without AppliedIn, you pick up confused.</p>
+    <br/><br/>
+    <div class="moment-card">
+      <div class="moment-scenario">📞 Unknown number calling...</div>
+      <div class="moment-call">
+        <div class="call-icon">🔍</div>
+        <div>
+          <div class="call-text">Search "Infosys" in AppliedIn</div>
+          <div class="call-sub">Takes 2 seconds</div>
+        </div>
+      </div>
+      <div class="moment-result">
+        <div class="result-icon">✅</div>
+        <div>
+          <div class="result-text">Applied 8 days ago — Software Developer</div>
+          <div class="result-detail">LinkedIn · Hyderabad · Status: Shortlisted</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features-section" id="features">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Everything a fresher needs</h2>
+    <p class="section-subtitle">Simple, focused, and built around how Indian freshers actually apply for jobs.</p>
+    <br/>
+    <div class="features-grid">
+      <div class="feature-card">
+        <span class="feature-icon">🤖</span>
+        <div class="feature-title">Auto capture on submit</div>
+        <div class="feature-desc">Captures only when you actually submit — not just when you click Apply. No false entries.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">⚠️</span>
+        <div class="feature-title">Duplicate detection</div>
+        <div class="feature-desc">Warns you if you already applied to the same company and role within 24 hours.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🏷️</span>
+        <div class="feature-title">5 status tags</div>
+        <div class="feature-desc">Applied, In Review, Interview, Shortlisted, Rejected. Update in one click anytime.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📊</span>
+        <div class="feature-title">Export to Excel & CSV</div>
+        <div class="feature-desc">Download your applications by today, this week, this month, or all time. Your data, your format.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔒</span>
+        <div class="feature-title">100% private</div>
+        <div class="feature-desc">All data stored only on your device. No server. No account. Nobody can see your applications.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🌐</span>
+        <div class="feature-title">Works on any website</div>
+        <div class="feature-desc">Beyond the 6 major portals — works on TCS, Infosys, Wipro, Deloitte career pages and any other company website.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section class="install-section" id="install">
+    <div class="section-label">Get started</div>
+    <h2 class="section-title">Install in 3 simple steps</h2>
+    <p class="section-subtitle">No Chrome Web Store needed. Direct install from GitHub. Free forever.</p>
+    <div class="install-steps">
+      <div class="install-step">
+        <div class="install-step-num">1</div>
+        Download ZIP from GitHub
+      </div>
+      <div class="install-arrow">→</div>
+      <div class="install-step">
+        <div class="install-step-num">2</div>
+        Open chrome://extensions
+      </div>
+      <div class="install-arrow">→</div>
+      <div class="install-step">
+        <div class="install-step-num">3</div>
+        Load Unpacked → Select folder
+      </div>
+    </div>
+    <a href="https://github.com/MOHITH-KVS/appliedin" target="_blank" class="btn-primary" style="font-size:16px; padding:16px 36px; border-radius:14px; box-shadow:0 4px 20px rgba(26,86,255,0.3);">
+      ⬇ Download from GitHub — Free
+    </a>
+    <p class="install-note">Works on Chrome, Edge, and Brave · No account required · Zero cost</p>
+  </section>
+
+  <!-- FAQ -->
+  <section style="padding:80px 24px; max-width:720px; margin:0 auto;">
+    <div class="section-label">FAQ</div>
+    <h2 class="section-title">Common questions</h2>
+    <br/>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+
+      <div style="border:1px solid var(--border); border-radius:14px; padding:20px 24px;">
+        <div style="font-size:15px; font-weight:700; color:var(--dark); margin-bottom:8px;">
+          Is AppliedIn completely free?
+        </div>
+        <div style="font-size:14px; color:var(--gray); line-height:1.6;">
+          Yes. Free forever. No subscription, no premium plan, no hidden charges. Download from GitHub and use it forever at zero cost.
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:14px; padding:20px 24px;">
+        <div style="font-size:15px; font-weight:700; color:var(--dark); margin-bottom:8px;">
+          Which job portals are supported?
+        </div>
+        <div style="font-size:14px; color:var(--gray); line-height:1.6;">
+          LinkedIn, Naukri, Internshala, Indeed, Glassdoor, Unstop — all automatic. Plus any company career website like TCS, Infosys, Wipro, Deloitte, Accenture, and more.
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:14px; padding:20px 24px;">
+        <div style="font-size:15px; font-weight:700; color:var(--dark); margin-bottom:8px;">
+          Is my data safe? Who can see my applications?
+        </div>
+        <div style="font-size:14px; color:var(--gray); line-height:1.6;">
+          Nobody. All data is stored only on your own device using Chrome local storage. No server involved. Not even the developer can see your applications.
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:14px; padding:20px 24px;">
+        <div style="font-size:15px; font-weight:700; color:var(--dark); margin-bottom:8px;">
+          How do I install it without the Chrome Web Store?
+        </div>
+        <div style="font-size:14px; color:var(--gray); line-height:1.6;">
+          Download the ZIP from GitHub → Open chrome://extensions → Turn on Developer Mode → Click Load Unpacked → Select the extension folder. Done in under 2 minutes.
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:14px; padding:20px 24px;">
+        <div style="font-size:15px; font-weight:700; color:var(--dark); margin-bottom:8px;">
+          What if I apply on a company's own website — like TCS or Infosys?
+        </div>
+        <div style="font-size:14px; color:var(--gray); line-height:1.6;">
+          AppliedIn detects apply button clicks on any website. For company career pages, a small confirmation popup appears asking "Did you complete this application?" — tap Yes and it's saved.
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border); border-radius:14px; padding:20px 24px;">
+        <div style="font-size:15px; font-weight:700; color:var(--dark); margin-bottom:8px;">
+          Can I export my applications to Excel?
+        </div>
+        <div style="font-size:14px; color:var(--gray); line-height:1.6;">
+          Yes. Export to Excel (.xlsx) or CSV anytime. Choose by time period — Today, This Week, This Month, This Year, or All Time. Your data, your format, offline.
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <a href="#" class="footer-logo">
+      <img src="icons/icon128.png" alt="AppliedIn" />
+      AppliedIn
+    </a>
+    <p class="footer-text">Built with ❤️ for Indian freshers</p>
+    <div class="footer-links">
+      <a href="https://github.com/MOHITH-KVS/appliedin" target="_blank" class="footer-link">GitHub</a>
+      <a href="https://github.com/MOHITH-KVS/appliedin/issues" target="_blank" class="footer-link">Report Bug</a>
+    </div>
+  </footer>
+
+</body>
+</html>
