@@ -13,16 +13,13 @@
   const PENDING_KEY = 'appliedin_pending_application';
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
-  // Strong, unambiguous signals only — avoids firing on "Continue"/"Next"
-  // clicks that happen at every step of the multi-step form.
+  // Only the exact, specific confirmation heading — deliberately narrow.
+  // Broader phrases like "application submitted" can appear as ordinary
+  // copy mid-form (e.g. "once submitted, your application submitted..."),
+  // which was causing the popup to fire before the form was even finished.
   const successPhrases = [
-    'your application was sent',
-    'application submitted',
-    'you\'ve applied',
-    'successfully applied',
-    'your resume was sent',
     'your application has been submitted',
-    'application complete'
+    'your application was sent'
   ];
 
   function urlLooksLikeFinalSuccess() {
@@ -139,10 +136,11 @@
     });
   }
 
-  // METHOD 0 — Page already loaded on a confirmed success URL/state
+  // METHOD 0 — Page already loaded on a confirmed success URL
   // (handles Indeed's step-by-step navigation landing directly on
-  // the post-apply confirmation page)
-  if (urlLooksLikeFinalSuccess() || bodyLooksLikeFinalSuccess()) {
+  // the post-apply confirmation page). URL is the authority here —
+  // text alone is too easily matched by ordinary mid-form copy.
+  if (urlLooksLikeFinalSuccess()) {
     setTimeout(handleFinalSuccess, 500);
   }
 
@@ -179,18 +177,19 @@
     }
   });
 
-  // METHOD 2 — Watch for success confirmation appearing in the DOM
-  const observer = new MutationObserver(function () {
-    if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeFinalSuccess()) {
-      setTimeout(handleFinalSuccess, 500);
-    }
-  });
+  // METHOD 2 — Poll for the URL reaching the confirmed success page.
+  // (Deliberately NOT scanning body text on every DOM mutation — that was
+  // the source of the premature/duplicate popups, since ordinary mid-form
+  // copy can loosely contain success-sounding words.)
+  let lastCheckedUrl = window.location.href;
+  const urlPoll = setInterval(function () {
+    if (window.location.href === lastCheckedUrl) return;
+    lastCheckedUrl = window.location.href;
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true
-  });
+    if (lastHandledUrl === window.location.href) return;
+    if (urlLooksLikeFinalSuccess()) {
+      setTimeout(handleFinalSuccess, 800);
+    }
+  }, 500);
 
 })();

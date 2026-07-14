@@ -1,12 +1,14 @@
 // AppliedIn - Naukri Content Script
-// Captures ONLY on submission confirmation
+// Captures ONLY on submission confirmation. Caches job details the moment
+// "Apply" is first clicked (while the listing page's DOM is still intact),
+// so the eventual save uses reliable data even if a modal later obscures it.
 
 (function () {
   console.log('[AppliedIn] naukri.js loaded on', window.location.href);
 
-  // Tracks the URL we already handled — prevents re-asking on every
-  // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
+  const PENDING_KEY = 'appliedin_pending_application';
+  const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
   function getJobDetails() {
     try {
@@ -14,18 +16,20 @@
         document.querySelector('.jd-header-title')?.innerText?.trim() ||
         document.querySelector('[class*="job-title"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
-        'Unknown Role';
+        null;
 
       const company =
         document.querySelector('.jd-header-comp-name a')?.innerText?.trim() ||
         document.querySelector('.jd-header-comp-name')?.innerText?.trim() ||
         document.querySelector('[class*="comp-name"]')?.innerText?.trim() ||
-        'Unknown Company';
+        null;
 
       const location =
         document.querySelector('.location')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
+
+      if (!title || !company) return null;
 
       return {
         company,
@@ -49,11 +53,29 @@
     'applied successfully'
   ];
 
+  function cachePendingJob(jobData) {
+    chrome.storage.local.set({
+      [PENDING_KEY]: { jobData, timestamp: Date.now() }
+    });
+  }
+
+  function getPendingJob(callback) {
+    chrome.storage.local.get([PENDING_KEY], function (result) {
+      const entry = result[PENDING_KEY];
+      if (entry && (Date.now() - entry.timestamp) < PENDING_MAX_AGE_MS) {
+        callback(entry.jobData);
+      } else {
+        callback(null);
+      }
+    });
+  }
+
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
       // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
       // saved — this URL stays marked as handled, no re-prompt
+      chrome.storage.local.remove(PENDING_KEY);
     });
   }
 
@@ -66,25 +88,28 @@
     if (lastHandledUrl === window.location.href) return;
     lastHandledUrl = window.location.href;
 
-    const jobData = getJobDetails();
+    getPendingJob(function (pendingJob) {
+      const jobData = pendingJob || getJobDetails();
 
-    if (jobData && jobData.company !== 'Unknown Company') {
-      saveApplication(jobData);
-    } else if (jobData) {
-      window.__appliedinCommon.showConfirmPopup(jobData, 'Naukri', function () {
-        // user answered — this URL stays marked as handled
-      });
-    } else {
-      lastHandledUrl = null;
-    }
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+        saveApplication(jobData);
+      } else if (jobData) {
+        window.__appliedinCommon.showConfirmPopup(jobData, 'Naukri', function () {
+          // user answered — this URL stays marked as handled
+        });
+      } else {
+        lastHandledUrl = null;
+      }
+    });
   }
 
-  // METHOD 1 — Final submit button
+  // METHOD 1 — Cache on click, then check for success shortly after
   document.addEventListener('click', function (e) {
     const button = e.target.closest('button, a');
     if (!button) return;
 
     const text = button.innerText?.trim().toLowerCase();
+    if (!text) return;
 
     if (
       text === 'submit' ||
@@ -92,6 +117,11 @@
       text === 'apply' ||
       text === 'confirm apply'
     ) {
+      // Cache the currently-visible job details in case a modal takes
+      // over the page before we can confirm the real success signal.
+      const jobData = getJobDetails();
+      if (jobData) cachePendingJob(jobData);
+
       if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {

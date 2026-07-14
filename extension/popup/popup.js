@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', function () {
           <div class="app-meta">
             <span class="app-platform">${escapeHtml(app.platform || 'Unknown')}</span>
             <div class="app-dot"></div>
-            <span class="app-date">${formatDate(app.date)}</span>
+            <span class="app-date" title="${escapeHtml(formatDateFull(app.date))}">${formatDate(app.date)}</span>
           </div>
           <select class="status-select status-badge status-${app.status.replace(' ', '-')}"
             data-index="${realIndex}">
@@ -396,9 +396,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const date = new Date(isoString);
     const now = new Date();
     const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-    if (diff === 0) return 'Today';
-    if (diff === 1) return 'Yesterday';
-    if (diff < 7) return `${diff} days ago`;
+    const time = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+    if (diff === 0) return `Today, ${time}`;
+    if (diff === 1) return `Yesterday, ${time}`;
+    if (diff < 7) return `${diff} days ago, ${time}`;
     if (diff < 30) return `${Math.floor(diff / 7)} weeks ago`;
     return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   }

@@ -1,5 +1,9 @@
 // AppliedIn - LinkedIn Content Script
-// Captures ONLY on final submission confirmation
+// Captures ONLY on final submission confirmation.
+// The Easy Apply modal can obscure/replace the underlying job title and
+// company elements once it's open, so we cache those details the moment
+// "Easy Apply" is clicked — while the job card is still visible — and use
+// that cached data at submission time instead of re-scraping the modal.
 
 (function () {
   console.log('[AppliedIn] linkedin.js loaded on', window.location.href);
@@ -7,6 +11,8 @@
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
+  const PENDING_KEY = 'appliedin_pending_application';
+  const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
   function getJobDetails() {
     try {
@@ -14,16 +20,18 @@
         document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
         document.querySelector('h1.t-24')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
-        'Unknown Role';
+        null;
 
       const company =
         document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
         document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
-        'Unknown Company';
+        null;
 
       const location =
         document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() ||
         'Unknown Location';
+
+      if (!title || !company) return null;
 
       return {
         company,
@@ -48,11 +56,29 @@
     'successfully applied'
   ];
 
+  function cachePendingJob(jobData) {
+    chrome.storage.local.set({
+      [PENDING_KEY]: { jobData, timestamp: Date.now() }
+    });
+  }
+
+  function getPendingJob(callback) {
+    chrome.storage.local.get([PENDING_KEY], function (result) {
+      const entry = result[PENDING_KEY];
+      if (entry && (Date.now() - entry.timestamp) < PENDING_MAX_AGE_MS) {
+        callback(entry.jobData);
+      } else {
+        callback(null);
+      }
+    });
+  }
+
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
       // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
       // saved — this URL stays marked as handled, no re-prompt
+      chrome.storage.local.remove(PENDING_KEY);
     });
   }
 
@@ -65,29 +91,38 @@
     if (lastHandledUrl === window.location.href) return;
     lastHandledUrl = window.location.href;
 
-    const jobData = getJobDetails();
-    console.log('[AppliedIn] jobData extracted:', jobData);
+    getPendingJob(function (pendingJob) {
+      const jobData = pendingJob || getJobDetails();
+      console.log('[AppliedIn] jobData for save:', jobData);
 
-    if (jobData && jobData.company !== 'Unknown Company') {
-      saveApplication(jobData);
-    } else if (jobData) {
-      window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
-        // user answered — this URL stays marked as handled
-      });
-    } else {
-      lastHandledUrl = null;
-    }
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+        saveApplication(jobData);
+      } else if (jobData) {
+        window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
+          // user answered — this URL stays marked as handled
+        });
+      } else {
+        lastHandledUrl = null;
+      }
+    });
   }
 
-  // METHOD 1 — Detect final "Submit application" button click
   document.addEventListener('click', function (e) {
     const button = e.target.closest('button');
     if (!button) return;
 
     const text = button.innerText?.trim().toLowerCase();
-    console.log('[AppliedIn] button clicked:', text);
+    if (!text) return;
 
-    // Only capture on FINAL submit — not on "Easy Apply" or "Next"
+    // "Easy Apply" just opens the modal — cache the real job details now,
+    // while the underlying job card is still visible and readable.
+    if (text === 'easy apply') {
+      const jobData = getJobDetails();
+      if (jobData) cachePendingJob(jobData);
+      return;
+    }
+
+    // Only capture on FINAL submit — not on "Next"/"Review"
     if (
       text === 'submit application' ||
       text === 'submit' ||
@@ -98,14 +133,12 @@
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
           handleSuccess();
-        } else {
-          console.log('[AppliedIn] submit clicked but no success text found yet');
         }
       }, 2000);
     }
   });
 
-  // METHOD 2 — Watch for success confirmation message in DOM
+  // Watch for success confirmation message in DOM
   const observer = new MutationObserver(function () {
     if (lastHandledUrl === window.location.href) return;
     if (bodyLooksLikeSuccess()) {
