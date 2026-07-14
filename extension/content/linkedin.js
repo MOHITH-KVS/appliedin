@@ -2,7 +2,11 @@
 // Captures ONLY on final submission confirmation
 
 (function () {
-  let captured = false;
+  console.log('[AppliedIn] linkedin.js loaded on', window.location.href);
+
+  // Tracks the URL we already handled — prevents re-asking on every
+  // subsequent DOM mutation once a success message is showing.
+  let lastHandledUrl = null;
 
   function getJobDetails() {
     try {
@@ -31,6 +35,7 @@
         status: 'Applied'
       };
     } catch (e) {
+      console.log('[AppliedIn] getJobDetails threw:', e);
       return null;
     }
   }
@@ -45,10 +50,33 @@
 
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
-      // duplicate — leave captured as-is
+      // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
-      captured = false;
+      // saved — this URL stays marked as handled, no re-prompt
     });
+  }
+
+  function bodyLooksLikeSuccess() {
+    const bodyText = (document.body.innerText || '').toLowerCase();
+    return successPhrases.some(p => bodyText.includes(p));
+  }
+
+  function handleSuccess() {
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
+
+    const jobData = getJobDetails();
+    console.log('[AppliedIn] jobData extracted:', jobData);
+
+    if (jobData && jobData.company !== 'Unknown Company') {
+      saveApplication(jobData);
+    } else if (jobData) {
+      window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
+        // user answered — this URL stays marked as handled
+      });
+    } else {
+      lastHandledUrl = null;
+    }
   }
 
   // METHOD 1 — Detect final "Submit application" button click
@@ -57,6 +85,7 @@
     if (!button) return;
 
     const text = button.innerText?.trim().toLowerCase();
+    console.log('[AppliedIn] button clicked:', text);
 
     // Only capture on FINAL submit — not on "Easy Apply" or "Next"
     if (
@@ -64,23 +93,13 @@
       text === 'submit' ||
       text === 'done'
     ) {
-      if (captured) return;
-      captured = true;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
-        const jobData = getJobDetails();
-        const bodyText = (document.body.innerText || '').toLowerCase();
-        const successDetected = successPhrases.some(p => bodyText.includes(p));
-
-        if (jobData && jobData.company !== 'Unknown Company' && successDetected) {
-          saveApplication(jobData);
-        } else if (jobData) {
-          // Not confident — ask the user instead of silently dropping it
-          window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
-            captured = false;
-          });
+        if (bodyLooksLikeSuccess()) {
+          handleSuccess();
         } else {
-          captured = false;
+          console.log('[AppliedIn] submit clicked but no success text found yet');
         }
       }, 2000);
     }
@@ -88,24 +107,9 @@
 
   // METHOD 2 — Watch for success confirmation message in DOM
   const observer = new MutationObserver(function () {
-    if (captured) return;
-
-    const bodyText = document.body.innerText || '';
-
-    const found = successPhrases.some(phrase =>
-      bodyText.toLowerCase().includes(phrase)
-    );
-
-    if (found) {
-      captured = true;
-      setTimeout(() => {
-        const jobData = getJobDetails();
-        if (jobData && jobData.company !== 'Unknown Company') {
-          saveApplication(jobData);
-        } else {
-          captured = false;
-        }
-      }, 1000);
+    if (lastHandledUrl === window.location.href) return;
+    if (bodyLooksLikeSuccess()) {
+      setTimeout(handleSuccess, 1000);
     }
   });
 

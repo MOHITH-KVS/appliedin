@@ -126,7 +126,7 @@ function injectUniversalTracker(platformName) {
   if (window.__appliedinInjected) return;
   window.__appliedinInjected = true;
 
-  let captured = false;
+  let lastHandledUrl = null;
 
   // All final submit button texts
   const submitTexts = [
@@ -221,14 +221,12 @@ function injectUniversalTracker(platformName) {
 
       if (isDuplicate) {
         showToast('⚠️ Already applied here recently!', '#f59e0b');
-        captured = false;
         return;
       }
 
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
         showToast('✅ Application saved — ' + jobData.company, '#22c55e');
-        captured = false;
       });
     });
   }
@@ -236,7 +234,7 @@ function injectUniversalTracker(platformName) {
   // METHOD 1 — Detect submit button click
   // Shows confirmation popup to verify before saving
   document.addEventListener('click', function (e) {
-    if (captured) return;
+    if (lastHandledUrl === window.location.href) return;
 
     const element = e.target.closest('button, input[type="submit"], input[type="button"], a');
     if (!element) return;
@@ -252,8 +250,6 @@ function injectUniversalTracker(platformName) {
     const isSubmitButton = submitTexts.some(t => text === t || text.includes(t));
     if (!isSubmitButton) return;
 
-    captured = true;
-
     // Wait for page to show confirmation
     setTimeout(() => {
       const bodyText = document.body.innerText || '';
@@ -262,11 +258,14 @@ function injectUniversalTracker(platformName) {
       );
 
       if (isConfirmed) {
+        if (lastHandledUrl === window.location.href) return;
+        lastHandledUrl = window.location.href;
         // Auto save — confirmation detected
         const jobData = getPageDetails();
         if (jobData) saveApplication(jobData);
-      } else {
-        // Show manual confirmation popup
+      } else if (lastHandledUrl !== window.location.href) {
+        lastHandledUrl = window.location.href;
+        // Not confident — ask the user instead of silently dropping it
         showConfirmPopup();
       }
     }, 2000);
@@ -274,7 +273,7 @@ function injectUniversalTracker(platformName) {
 
   // METHOD 2 — Watch DOM for success confirmation message
   const observer = new MutationObserver(function () {
-    if (captured) return;
+    if (lastHandledUrl === window.location.href) return;
 
     const bodyText = document.body.innerText || '';
     const isConfirmed = successPhrases.some(phrase =>
@@ -282,7 +281,7 @@ function injectUniversalTracker(platformName) {
     );
 
     if (isConfirmed) {
-      captured = true;
+      lastHandledUrl = window.location.href;
       setTimeout(() => {
         const jobData = getPageDetails();
         if (jobData) saveApplication(jobData);
@@ -383,7 +382,6 @@ function injectUniversalTracker(platformName) {
 
     document.getElementById('appliedin-no').addEventListener('click', function () {
       popup.remove();
-      captured = false;
     });
   }
 

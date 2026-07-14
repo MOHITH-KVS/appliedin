@@ -2,7 +2,11 @@
 // Captures ONLY on submission confirmation
 
 (function () {
-  let captured = false;
+  console.log('[AppliedIn] internshala.js loaded on', window.location.href);
+
+  // Tracks the URL we already handled — prevents re-asking on every
+  // subsequent DOM mutation once a success message is showing.
+  let lastHandledUrl = null;
 
   function getJobDetails() {
     try {
@@ -48,10 +52,32 @@
 
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
-      // duplicate — leave captured as-is
+      // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
-      captured = false;
+      // saved — this URL stays marked as handled, no re-prompt
     });
+  }
+
+  function bodyLooksLikeSuccess() {
+    const bodyText = (document.body.innerText || '').toLowerCase();
+    return successPhrases.some(p => bodyText.includes(p));
+  }
+
+  function handleSuccess() {
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
+
+    const jobData = getJobDetails();
+
+    if (jobData && jobData.company !== 'Unknown Company') {
+      saveApplication(jobData);
+    } else if (jobData) {
+      window.__appliedinCommon.showConfirmPopup(jobData, 'Internshala', function () {
+        // user answered — this URL stays marked as handled
+      });
+    } else {
+      lastHandledUrl = null;
+    }
   }
 
   // METHOD 1 — Final submit button
@@ -67,22 +93,11 @@
       text === 'send application' ||
       text === 'confirm'
     ) {
-      if (captured) return;
-      captured = true;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
-        const jobData = getJobDetails();
-        const bodyText = (document.body.innerText || '').toLowerCase();
-        const successDetected = successPhrases.some(p => bodyText.includes(p));
-
-        if (jobData && jobData.company !== 'Unknown Company' && successDetected) {
-          saveApplication(jobData);
-        } else if (jobData) {
-          window.__appliedinCommon.showConfirmPopup(jobData, 'Internshala', function () {
-            captured = false;
-          });
-        } else {
-          captured = false;
+        if (bodyLooksLikeSuccess()) {
+          handleSuccess();
         }
       }, 2000);
     }
@@ -90,24 +105,9 @@
 
   // METHOD 2 — Watch for success message
   const observer = new MutationObserver(function () {
-    if (captured) return;
-
-    const bodyText = document.body.innerText || '';
-
-    const found = successPhrases.some(phrase =>
-      bodyText.toLowerCase().includes(phrase)
-    );
-
-    if (found) {
-      captured = true;
-      setTimeout(() => {
-        const jobData = getJobDetails();
-        if (jobData && jobData.company !== 'Unknown Company') {
-          saveApplication(jobData);
-        } else {
-          captured = false;
-        }
-      }, 1000);
+    if (lastHandledUrl === window.location.href) return;
+    if (bodyLooksLikeSuccess()) {
+      setTimeout(handleSuccess, 1000);
     }
   });
 

@@ -4,11 +4,14 @@
 
 (function () {
   console.log('[AppliedIn] unstop.js loaded on', window.location.href);
-  let captured = false;
+
+  // Tracks the URL we already handled — prevents re-asking on every
+  // subsequent DOM mutation on a static "success" page.
+  let lastHandledUrl = null;
 
   const GENERIC_PHRASES = [
     'registration successful', 'successfully registered', 'application submitted',
-    'thank you for registering', 'participation confirmed', 'success'
+    'thank you for registering', 'participation confirmed'
   ];
 
   const successPhrases = [
@@ -58,57 +61,62 @@
         status: 'Applied'
       };
     } catch (e) {
+      console.log('[AppliedIn] getJobDetails threw:', e);
       return null;
     }
   }
 
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
-      // duplicate — leave captured as-is
+      // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
-      captured = false;
+      // saved — this URL stays marked as handled, no re-prompt
     });
   }
 
-  // METHOD 0 — Page loaded directly on a success/confirmation URL or state
-  // Unstop navigates to a brand-new URL (…/register/success) after registering,
-  // so by the time this script attaches, the confirmation text is already
-  // present — a MutationObserver alone will never see it change.
-  function checkImmediateSuccess() {
-    if (captured) return;
-
+  function urlLooksLikeSuccess() {
     const url = window.location.href.toLowerCase();
+    return url.includes('/success') || url.includes('rstatus=1');
+  }
+
+  function textLooksLikeSuccess() {
     const bodyText = document.body.innerText || '';
+    return successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
+  }
 
-    const urlLooksLikeSuccess = url.includes('/success') || url.includes('rstatus=1');
-    const textLooksLikeSuccess = successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
+  function handleSuccess() {
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
 
-    console.log('[AppliedIn] checkImmediateSuccess:', { urlLooksLikeSuccess, textLooksLikeSuccess });
+    const jobData = getJobDetails();
+    console.log('[AppliedIn] jobData extracted:', jobData);
 
-    if (urlLooksLikeSuccess || textLooksLikeSuccess) {
-      captured = true;
-      setTimeout(() => {
-        const jobData = getJobDetails();
-        console.log('[AppliedIn] jobData extracted:', jobData);
-        if (jobData && jobData.company !== 'Unknown Company') {
-          saveApplication(jobData);
-        } else if (jobData) {
-          console.log('[AppliedIn] company unknown, showing confirm popup');
-          // We know it succeeded (URL/text confirms it) but couldn't
-          // read the company/role — ask the user to fill it in.
-          window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {
-            captured = false;
-          });
-        } else {
-          captured = false;
-        }
-      }, 500);
+    if (jobData && jobData.company !== 'Unknown Company') {
+      saveApplication(jobData);
+    } else if (jobData) {
+      console.log('[AppliedIn] company unknown, showing confirm popup');
+      window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {
+        // user answered — this URL stays marked as handled
+      });
+    } else {
+      // couldn't read anything — allow a later mutation to retry
+      lastHandledUrl = null;
     }
   }
 
-  checkImmediateSuccess();
+  // METHOD 0 — Page loaded directly on a success/confirmation URL or state.
+  // Unstop navigates to a brand-new URL (…/register/success) after
+  // registering, so a MutationObserver alone would never see this happen
+  // (the text is already there by the time we attach).
+  const immediateUrlSuccess = urlLooksLikeSuccess();
+  const immediateTextSuccess = textLooksLikeSuccess();
+  console.log('[AppliedIn] immediate check:', { immediateUrlSuccess, immediateTextSuccess, url: window.location.href });
 
-  // METHOD 1 — Final submit button
+  if (immediateUrlSuccess || immediateTextSuccess) {
+    setTimeout(handleSuccess, 500);
+  }
+
+  // METHOD 1 — Final submit/register button click
   document.addEventListener('click', function (e) {
     const button = e.target.closest('button, a');
     if (!button) return;
@@ -122,49 +130,21 @@
       text === 'confirm' ||
       text === 'participate'
     ) {
-      if (captured) return;
-      captured = true;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
-        const jobData = getJobDetails();
-        const bodyText = (document.body.innerText || '').toLowerCase();
-        const url = window.location.href.toLowerCase();
-        const successDetected = successPhrases.some(p => bodyText.includes(p)) ||
-          url.includes('/success') || url.includes('rstatus=1');
-
-        if (jobData && jobData.company !== 'Unknown Company' && successDetected) {
-          saveApplication(jobData);
-        } else if (jobData) {
-          window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {
-            captured = false;
-          });
-        } else {
-          captured = false;
+        if (urlLooksLikeSuccess() || textLooksLikeSuccess()) {
+          handleSuccess();
         }
       }, 2000);
     }
   });
 
-  // METHOD 2 — Watch for success message
+  // METHOD 2 — Watch for success message appearing in the DOM
   const observer = new MutationObserver(function () {
-    if (captured) return;
-
-    const bodyText = document.body.innerText || '';
-
-    const found = successPhrases.some(phrase =>
-      bodyText.toLowerCase().includes(phrase)
-    );
-
-    if (found) {
-      captured = true;
-      setTimeout(() => {
-        const jobData = getJobDetails();
-        if (jobData && jobData.company !== 'Unknown Company') {
-          saveApplication(jobData);
-        } else {
-          captured = false;
-        }
-      }, 1000);
+    if (lastHandledUrl === window.location.href) return;
+    if (textLooksLikeSuccess()) {
+      setTimeout(handleSuccess, 1000);
     }
   });
 

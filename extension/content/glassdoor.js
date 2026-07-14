@@ -8,7 +8,10 @@
 (function () {
   console.log('[AppliedIn] glassdoor.js loaded on', window.location.href);
 
-  let captured = false;
+  // Tracks the URL we already handled — prevents re-asking on every
+  // subsequent DOM mutation on a static "success" page (the success text
+  // never disappears, so a boolean flag alone would loop forever).
+  let lastHandledUrl = null;
   const PENDING_KEY = 'appliedin_pending_application';
 
   const successPhrases = [
@@ -62,9 +65,9 @@
 
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
-      // duplicate — leave captured as-is
+      // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
-      captured = false;
+      // saved — this URL stays marked as handled, no re-prompt
       chrome.storage.local.remove(PENDING_KEY);
     });
   }
@@ -74,17 +77,22 @@
     return successPhrases.some(p => bodyText.includes(p));
   }
 
+  function handleFinalSuccess() {
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
+
+    const jobData = getJobDetails();
+    if (jobData) {
+      saveApplication(jobData);
+    } else {
+      // couldn't read anything — allow a later mutation to retry
+      lastHandledUrl = null;
+    }
+  }
+
   // METHOD 0 — Page already showing a success state on load
   if (bodyLooksLikeFinalSuccess()) {
-    captured = true;
-    setTimeout(() => {
-      const jobData = getJobDetails();
-      if (jobData) {
-        saveApplication(jobData);
-      } else {
-        captured = false;
-      }
-    }, 500);
+    setTimeout(handleFinalSuccess, 500);
   }
 
   document.addEventListener('click', function (e) {
@@ -110,21 +118,26 @@
       text.includes('send application');
 
     if (isFinalSubmit) {
-      if (captured) return;
-      captured = true;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
         const jobData = getJobDetails();
         const successDetected = bodyLooksLikeFinalSuccess();
 
-        if (jobData && successDetected) {
+        if (!successDetected) return; // not actually done yet — stay silent
+
+        lastHandledUrl = window.location.href;
+
+        if (jobData) {
           saveApplication(jobData);
-        } else if (jobData) {
-          window.__appliedinCommon.showConfirmPopup(jobData, 'Glassdoor', function () {
-            captured = false;
-          });
         } else {
-          captured = false;
+          window.__appliedinCommon.showConfirmPopup(
+            { company: '', role: '', platform: 'Glassdoor', url: window.location.href, date: new Date().toISOString(), status: 'Applied' },
+            'Glassdoor',
+            function () {
+              // user answered — this URL stays marked as handled
+            }
+          );
         }
       }, 2000);
     }
@@ -132,18 +145,9 @@
 
   // METHOD 2 — Watch for success message appearing in the DOM
   const observer = new MutationObserver(function () {
-    if (captured) return;
-
+    if (lastHandledUrl === window.location.href) return;
     if (bodyLooksLikeFinalSuccess()) {
-      captured = true;
-      setTimeout(() => {
-        const jobData = getJobDetails();
-        if (jobData) {
-          saveApplication(jobData);
-        } else {
-          captured = false;
-        }
-      }, 1000);
+      setTimeout(handleFinalSuccess, 1000);
     }
   });
 

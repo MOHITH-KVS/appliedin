@@ -9,7 +9,7 @@
 (function () {
   console.log('[AppliedIn] indeed.js loaded on', window.location.href);
 
-  let captured = false;
+  let lastHandledUrl = null;
   const PENDING_KEY = 'appliedin_pending_application';
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -112,16 +112,16 @@
 
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
-      // duplicate — leave captured as-is
+      // duplicate — this URL stays marked as handled, no re-prompt
     }, function () {
-      captured = false;
+      // saved — this URL stays marked as handled, no re-prompt
       chrome.storage.local.remove(PENDING_KEY);
     });
   }
 
   function handleFinalSuccess() {
-    if (captured) return;
-    captured = true;
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetailsFromApplySummary();
@@ -130,10 +130,11 @@
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Indeed', function () {
-          captured = false;
+          // user answered (Yes or No) — this URL stays marked as handled
         });
       } else {
-        captured = false;
+        // couldn't read anything — allow a later mutation to retry
+        lastHandledUrl = null;
       }
     });
   }
@@ -180,7 +181,7 @@
 
   // METHOD 2 — Watch for success confirmation appearing in the DOM
   const observer = new MutationObserver(function () {
-    if (captured) return;
+    if (lastHandledUrl === window.location.href) return;
     if (bodyLooksLikeFinalSuccess()) {
       setTimeout(handleFinalSuccess, 500);
     }
