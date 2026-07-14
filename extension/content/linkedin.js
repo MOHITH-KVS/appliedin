@@ -14,17 +14,33 @@
   const PENDING_KEY = 'appliedin_pending_application';
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
+  // LinkedIn's tab title reliably follows "Job Title | Company | LinkedIn"
+  // — much more stable than CSS class names, which change frequently.
+  function getDetailsFromTabTitle() {
+    const parts = (document.title || '').split('|').map(p => p.trim()).filter(Boolean);
+    // parts[0] = role, parts[1] = company, parts[last] usually "LinkedIn"
+    if (parts.length >= 2) {
+      return { role: parts[0], company: parts[1] };
+    }
+    return { role: null, company: null };
+  }
+
   function getJobDetails() {
     try {
+      const tabTitle = getDetailsFromTabTitle();
+
       const title =
         document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
         document.querySelector('h1.t-24')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
+        tabTitle.role ||
         'Unknown Role';
 
       const company =
         document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
         document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
+        document.querySelector('a[href*="/company/"]')?.innerText?.trim() ||
+        tabTitle.company ||
         'Unknown Company';
 
       const location =
@@ -42,11 +58,12 @@
       };
     } catch (e) {
       console.log('[AppliedIn] getJobDetails threw:', e);
-      // Even on error, return SOMETHING so a popup can still be shown —
-      // never go completely silent.
+      // Last-resort fallback: try the tab title one more time before
+      // giving up completely.
+      const tabTitle = getDetailsFromTabTitle();
       return {
-        company: 'Unknown Company',
-        role: 'Unknown Role',
+        company: tabTitle.company || 'Unknown Company',
+        role: tabTitle.role || 'Unknown Role',
         location: 'Unknown Location',
         platform: 'LinkedIn',
         url: window.location.href,
