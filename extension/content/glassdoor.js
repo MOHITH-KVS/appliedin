@@ -29,19 +29,17 @@
         document.querySelector('[data-test="job-title"]')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
-        null;
+        'Unknown Role';
 
       const company =
         document.querySelector('[data-test="employer-name"]')?.innerText?.trim() ||
         document.querySelector('[class*="employerName"]')?.innerText?.trim() ||
-        null;
+        'Unknown Company';
 
       const location =
         document.querySelector('[data-test="job-location"]')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
-
-      if (!title || !company) return null;
 
       return {
         company,
@@ -53,8 +51,26 @@
         status: 'Applied'
       };
     } catch (e) {
-      return null;
+      // Even on error, return SOMETHING so a popup can still be shown —
+      // never go completely silent.
+      return {
+        company: 'Unknown Company',
+        role: 'Unknown Role',
+        location: 'Unknown Location',
+        platform: 'Glassdoor',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
     }
+  }
+
+  // Stricter version used ONLY for caching — we don't want to cache
+  // "Unknown Company" as if it were reliable data.
+  function getJobDetailsForCaching() {
+    const jobData = getJobDetails();
+    if (jobData.company === 'Unknown Company' || jobData.role === 'Unknown Role') return null;
+    return jobData;
   }
 
   function cachePendingJob(jobData) {
@@ -106,7 +122,7 @@
     // Indeed. Cache the correct job details now, while we can still read
     // them, but don't mark this as a completed application yet.
     if (text === 'apply now' || text === 'easy apply' || text === 'apply') {
-      const jobData = getJobDetails();
+      const jobData = getJobDetailsForCaching();
       if (jobData) cachePendingJob(jobData);
       return;
     }

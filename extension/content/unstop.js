@@ -41,20 +41,18 @@
         document.querySelector('h3')?.innerText?.trim(),
         document.querySelector('h1')?.innerText?.trim()
       ];
-      const title = titleCandidates.find(t => t && !isGenericText(t)) || null;
+      const title = titleCandidates.find(t => t && !isGenericText(t)) || 'Unknown Role';
 
       const companyCandidates = [
         document.querySelector('.company-name')?.innerText?.trim(),
         document.querySelector('[class*="org-name"]')?.innerText?.trim(),
         document.querySelector('[class*="company"]')?.innerText?.trim()
       ];
-      const company = companyCandidates.find(c => c && !isGenericText(c)) || null;
+      const company = companyCandidates.find(c => c && !isGenericText(c)) || 'Unknown Company';
 
       const location =
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
-
-      if (!title || !company) return null;
 
       return {
         company,
@@ -67,8 +65,26 @@
       };
     } catch (e) {
       console.log('[AppliedIn] getJobDetails threw:', e);
-      return null;
+      // Even on error, return SOMETHING so a popup can still be shown —
+      // never go completely silent.
+      return {
+        company: 'Unknown Company',
+        role: 'Unknown Role',
+        location: 'Unknown Location',
+        platform: 'Unstop',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
     }
+  }
+
+  // Stricter version used ONLY for caching — we don't want to cache
+  // "Unknown Company" as if it were reliable data.
+  function getJobDetailsForCaching() {
+    const jobData = getJobDetails();
+    if (jobData.company === 'Unknown Company' || jobData.role === 'Unknown Role') return null;
+    return jobData;
   }
 
   function cachePendingJob(jobData) {
@@ -152,7 +168,7 @@
       text === 'confirm' ||
       text === 'participate'
     ) {
-      const jobData = getJobDetails();
+      const jobData = getJobDetailsForCaching();
       if (jobData) cachePendingJob(jobData);
 
       if (lastHandledUrl === window.location.href) return;

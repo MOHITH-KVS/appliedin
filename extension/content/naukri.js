@@ -16,20 +16,18 @@
         document.querySelector('.jd-header-title')?.innerText?.trim() ||
         document.querySelector('[class*="job-title"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
-        null;
+        'Unknown Role';
 
       const company =
         document.querySelector('.jd-header-comp-name a')?.innerText?.trim() ||
         document.querySelector('.jd-header-comp-name')?.innerText?.trim() ||
         document.querySelector('[class*="comp-name"]')?.innerText?.trim() ||
-        null;
+        'Unknown Company';
 
       const location =
         document.querySelector('.location')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
-
-      if (!title || !company) return null;
 
       return {
         company,
@@ -41,8 +39,26 @@
         status: 'Applied'
       };
     } catch (e) {
-      return null;
+      // Even on error, return SOMETHING so a popup can still be shown —
+      // never go completely silent.
+      return {
+        company: 'Unknown Company',
+        role: 'Unknown Role',
+        location: 'Unknown Location',
+        platform: 'Naukri',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
     }
+  }
+
+  // Stricter version used ONLY for caching — we don't want to cache
+  // "Unknown Company" as if it were reliable data.
+  function getJobDetailsForCaching() {
+    const jobData = getJobDetails();
+    if (jobData.company === 'Unknown Company' || jobData.role === 'Unknown Role') return null;
+    return jobData;
   }
 
   const successPhrases = [
@@ -119,7 +135,7 @@
     ) {
       // Cache the currently-visible job details in case a modal takes
       // over the page before we can confirm the real success signal.
-      const jobData = getJobDetails();
+      const jobData = getJobDetailsForCaching();
       if (jobData) cachePendingJob(jobData);
 
       if (lastHandledUrl === window.location.href) return;

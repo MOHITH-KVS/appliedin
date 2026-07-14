@@ -20,18 +20,16 @@
         document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
         document.querySelector('h1.t-24')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
-        null;
+        'Unknown Role';
 
       const company =
         document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
         document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
-        null;
+        'Unknown Company';
 
       const location =
         document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() ||
         'Unknown Location';
-
-      if (!title || !company) return null;
 
       return {
         company,
@@ -44,8 +42,26 @@
       };
     } catch (e) {
       console.log('[AppliedIn] getJobDetails threw:', e);
-      return null;
+      // Even on error, return SOMETHING so a popup can still be shown —
+      // never go completely silent.
+      return {
+        company: 'Unknown Company',
+        role: 'Unknown Role',
+        location: 'Unknown Location',
+        platform: 'LinkedIn',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
     }
+  }
+
+  // Stricter version used ONLY for caching — we don't want to cache
+  // "Unknown Company" as if it were reliable data.
+  function getJobDetailsForCaching() {
+    const jobData = getJobDetails();
+    if (jobData.company === 'Unknown Company' || jobData.role === 'Unknown Role') return null;
+    return jobData;
   }
 
   const successPhrases = [
@@ -117,7 +133,7 @@
     // "Easy Apply" just opens the modal — cache the real job details now,
     // while the underlying job card is still visible and readable.
     if (text === 'easy apply') {
-      const jobData = getJobDetails();
+      const jobData = getJobDetailsForCaching();
       if (jobData) cachePendingJob(jobData);
       return;
     }

@@ -68,16 +68,15 @@
 
   // Fallback: on the smartapply summary card itself (seen on the right side
   // of the apply flow), the role/company are often shown even though the
-  // rest of the DOM is unfamiliar.
+  // rest of the DOM is unfamiliar. Never returns null — this is the last
+  // resort before showing the popup, so it must always produce something.
   function getJobDetailsFromApplySummary() {
     try {
-      const role = document.querySelector('h1, h2')?.innerText?.trim() || null;
-      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || null;
-
-      if (!role) return null;
+      const role = document.querySelector('h1, h2')?.innerText?.trim() || 'Unknown Role';
+      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || 'Unknown Company';
 
       return {
-        company: companyLine || 'Unknown Company',
+        company: companyLine,
         role,
         location: 'Unknown Location',
         platform: 'Indeed',
@@ -86,7 +85,15 @@
         status: 'Applied'
       };
     } catch (e) {
-      return null;
+      return {
+        company: 'Unknown Company',
+        role: 'Unknown Role',
+        location: 'Unknown Location',
+        platform: 'Indeed',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
     }
   }
 
