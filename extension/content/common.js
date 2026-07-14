@@ -155,14 +155,6 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       popup.remove();
       if (onDone) onDone();
     });
-
-    // Auto dismiss after 20 seconds so it doesn't linger forever
-    setTimeout(() => {
-      if (document.getElementById('appliedin-confirm')) {
-        popup.remove();
-        if (onDone) onDone();
-      }
-    }, 20000);
   }
 
   return { saveApplication, showNotification, showConfirmPopup };

@@ -385,14 +385,6 @@ function injectUniversalTracker(platformName) {
       popup.remove();
       captured = false;
     });
-
-    // Auto dismiss after 20 seconds
-    setTimeout(() => {
-      if (document.getElementById('appliedin-confirm')) {
-        popup.remove();
-        captured = false;
-      }
-    }, 20000);
   }
 
   function showToast(message, color) {

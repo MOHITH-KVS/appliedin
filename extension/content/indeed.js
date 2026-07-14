@@ -1,26 +1,59 @@
 // AppliedIn - Indeed Content Script
-// Captures ONLY on submission confirmation
+// Indeed's apply flow is multi-step and often moves to a different
+// subdomain (smartapply.indeed.com) whose pages don't have the job
+// title/company in the DOM. So instead of re-scraping an unfamiliar
+// page at the end, we cache the correct job details from the real
+// job listing page the moment the user starts applying, then use that
+// cached data once we see a genuine completion signal.
 
 (function () {
-  let captured = false;
+  console.log('[AppliedIn] indeed.js loaded on', window.location.href);
 
-  function getJobDetails() {
+  let captured = false;
+  const PENDING_KEY = 'appliedin_pending_application';
+  const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+
+  // Strong, unambiguous signals only — avoids firing on "Continue"/"Next"
+  // clicks that happen at every step of the multi-step form.
+  const successPhrases = [
+    'your application was sent',
+    'application submitted',
+    'you\'ve applied',
+    'successfully applied',
+    'your resume was sent',
+    'your application has been submitted',
+    'application complete'
+  ];
+
+  function urlLooksLikeFinalSuccess() {
+    const url = window.location.href.toLowerCase();
+    return url.includes('post-apply') || url.includes('application-sent') || url.includes('applied=1');
+  }
+
+  function bodyLooksLikeFinalSuccess() {
+    const bodyText = (document.body.innerText || '').toLowerCase();
+    return successPhrases.some(p => bodyText.includes(p));
+  }
+
+  function getJobDetailsFromListingPage() {
     try {
       const title =
         document.querySelector('.jobsearch-JobInfoHeader-title')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
-        'Unknown Role';
+        null;
 
       const company =
         document.querySelector('[data-company-name="true"]')?.innerText?.trim() ||
         document.querySelector('[class*="companyName"]')?.innerText?.trim() ||
-        'Unknown Company';
+        null;
 
       const location =
         document.querySelector('[data-testid="job-location"]')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
+
+      if (!title || !company) return null;
 
       return {
         company,
@@ -36,79 +69,120 @@
     }
   }
 
-  const successPhrases = [
-    'your application was sent',
-    'application submitted',
-    'you\'ve applied',
-    'successfully applied',
-    'your resume was sent',
-    'application complete'
-  ];
+  // Fallback: on the smartapply summary card itself (seen on the right side
+  // of the apply flow), the role/company are often shown even though the
+  // rest of the DOM is unfamiliar.
+  function getJobDetailsFromApplySummary() {
+    try {
+      const role = document.querySelector('h1, h2')?.innerText?.trim() || null;
+      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || null;
+
+      if (!role) return null;
+
+      return {
+        company: companyLine || 'Unknown Company',
+        role,
+        location: 'Unknown Location',
+        platform: 'Indeed',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function cachePendingJob(jobData) {
+    chrome.storage.local.set({
+      [PENDING_KEY]: { jobData, timestamp: Date.now() }
+    });
+  }
+
+  function getPendingJob(callback) {
+    chrome.storage.local.get([PENDING_KEY], function (result) {
+      const entry = result[PENDING_KEY];
+      if (entry && (Date.now() - entry.timestamp) < PENDING_MAX_AGE_MS) {
+        callback(entry.jobData);
+      } else {
+        callback(null);
+      }
+    });
+  }
 
   function saveApplication(jobData) {
     window.__appliedinCommon.saveApplication(jobData, function () {
       // duplicate — leave captured as-is
     }, function () {
       captured = false;
+      chrome.storage.local.remove(PENDING_KEY);
     });
   }
 
-  // METHOD 1 — Final submit button
+  function handleFinalSuccess() {
+    if (captured) return;
+    captured = true;
+
+    getPendingJob(function (pendingJob) {
+      const jobData = pendingJob || getJobDetailsFromApplySummary();
+
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+        saveApplication(jobData);
+      } else if (jobData) {
+        window.__appliedinCommon.showConfirmPopup(jobData, 'Indeed', function () {
+          captured = false;
+        });
+      } else {
+        captured = false;
+      }
+    });
+  }
+
+  // METHOD 0 — Page already loaded on a confirmed success URL/state
+  // (handles Indeed's step-by-step navigation landing directly on
+  // the post-apply confirmation page)
+  if (urlLooksLikeFinalSuccess() || bodyLooksLikeFinalSuccess()) {
+    setTimeout(handleFinalSuccess, 500);
+  }
+
+  // METHOD 1 — Cache job details the moment the user starts applying
+  // (only on the real job listing page, where selectors are reliable)
   document.addEventListener('click', function (e) {
-    const button = e.target.closest('button');
+    const button = e.target.closest('button, a');
     if (!button) return;
 
     const text = button.innerText?.trim().toLowerCase();
+    if (!text) return;
 
-    if (
-      text &&
-      (text === 'submit' ||
-      text === 'continue' ||
-      text === 'apply' ||
+    const isApplyStart = text === 'apply now' || text === 'apply';
+
+    if (isApplyStart) {
+      const jobData = getJobDetailsFromListingPage();
+      if (jobData) cachePendingJob(jobData);
+      return;
+    }
+
+    // Only a truly explicit final-submit label counts — "Continue"/"Next"
+    // deliberately excluded since they fire on every intermediate step.
+    const isFinalSubmit =
+      text === 'submit' ||
       text.includes('submit application') ||
-      text.includes('submit your application'))
-    ) {
-      if (captured) return;
-      captured = true;
+      text.includes('submit your application');
 
+    if (isFinalSubmit) {
       setTimeout(() => {
-        const jobData = getJobDetails();
-        const bodyText = (document.body.innerText || '').toLowerCase();
-        const successDetected = successPhrases.some(p => bodyText.includes(p));
-
-        if (jobData && jobData.company !== 'Unknown Company' && successDetected) {
-          saveApplication(jobData);
-        } else if (jobData) {
-          window.__appliedinCommon.showConfirmPopup(jobData, 'Indeed', function () {
-            captured = false;
-          });
-        } else {
-          captured = false;
+        if (urlLooksLikeFinalSuccess() || bodyLooksLikeFinalSuccess()) {
+          handleFinalSuccess();
         }
       }, 2000);
     }
   });
 
-  // METHOD 2 — Watch for success message
+  // METHOD 2 — Watch for success confirmation appearing in the DOM
   const observer = new MutationObserver(function () {
     if (captured) return;
-
-    const bodyText = document.body.innerText || '';
-
-    const found = successPhrases.some(phrase =>
-      bodyText.toLowerCase().includes(phrase)
-    );
-
-    if (found) {
-      captured = true;
-      setTimeout(() => {
-        const jobData = getJobDetails();
-        if (jobData && jobData.company !== 'Unknown Company') {
-          saveApplication(jobData);
-        } else {
-          captured = false;
-        }
-      }, 1000);
+    if (bodyLooksLikeFinalSuccess()) {
+      setTimeout(handleFinalSuccess, 500);
     }
   });
 
