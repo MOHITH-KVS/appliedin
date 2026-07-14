@@ -1,22 +1,48 @@
 // AppliedIn - Unstop Content Script
-// Captures ONLY on submission confirmation
+// Captures on submission confirmation, with a manual-confirm fallback
+// for anything the automatic detection can't be sure about.
 
 (function () {
+  console.log('[AppliedIn] unstop.js loaded on', window.location.href);
   let captured = false;
+
+  const GENERIC_PHRASES = [
+    'registration successful', 'successfully registered', 'application submitted',
+    'thank you for registering', 'participation confirmed', 'success'
+  ];
+
+  const successPhrases = [
+    'successfully registered',
+    'registration successful',
+    'successfully applied',
+    'application submitted',
+    'you have registered',
+    'thank you for registering',
+    'participation confirmed'
+  ];
+
+  function isGenericText(text) {
+    if (!text) return true;
+    const lower = text.toLowerCase().trim();
+    return GENERIC_PHRASES.some(p => lower === p || lower.includes(p));
+  }
 
   function getJobDetails() {
     try {
-      const title =
-        document.querySelector('.opportunity-heading')?.innerText?.trim() ||
-        document.querySelector('[class*="opportunity-title"]')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
-        'Unknown Role';
+      const titleCandidates = [
+        document.querySelector('.opportunity-heading')?.innerText?.trim(),
+        document.querySelector('[class*="opportunity-title"]')?.innerText?.trim(),
+        document.querySelector('h3')?.innerText?.trim(),
+        document.querySelector('h1')?.innerText?.trim()
+      ];
+      const title = titleCandidates.find(t => t && !isGenericText(t)) || 'Unknown Role';
 
-      const company =
-        document.querySelector('.company-name')?.innerText?.trim() ||
-        document.querySelector('[class*="org-name"]')?.innerText?.trim() ||
-        document.querySelector('[class*="company"]')?.innerText?.trim() ||
-        'Unknown Company';
+      const companyCandidates = [
+        document.querySelector('.company-name')?.innerText?.trim(),
+        document.querySelector('[class*="org-name"]')?.innerText?.trim(),
+        document.querySelector('[class*="company"]')?.innerText?.trim()
+      ];
+      const company = companyCandidates.find(c => c && !isGenericText(c)) || 'Unknown Company';
 
       const location =
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
@@ -37,57 +63,50 @@
   }
 
   function saveApplication(jobData) {
-    chrome.storage.local.get(['applications'], function (result) {
-      const applications = result.applications || [];
-
-      const isDuplicate = applications.some(app =>
-        app.company.toLowerCase() === jobData.company.toLowerCase() &&
-        app.role.toLowerCase() === jobData.role.toLowerCase() &&
-        (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-      );
-
-      if (isDuplicate) {
-        showNotification('⚠️ Already applied here recently!', 'warning');
-        return;
-      }
-
-      applications.unshift(jobData);
-      chrome.storage.local.set({ applications }, function () {
-        showNotification('✅ Application saved — ' + jobData.company, 'success');
-        captured = false;
-      });
+    window.__appliedinCommon.saveApplication(jobData, function () {
+      // duplicate — leave captured as-is
+    }, function () {
+      captured = false;
     });
   }
 
-  function showNotification(message, type) {
-    const existing = document.getElementById('appliedin-notification');
-    if (existing) existing.remove();
+  // METHOD 0 — Page loaded directly on a success/confirmation URL or state
+  // Unstop navigates to a brand-new URL (…/register/success) after registering,
+  // so by the time this script attaches, the confirmation text is already
+  // present — a MutationObserver alone will never see it change.
+  function checkImmediateSuccess() {
+    if (captured) return;
 
-    const n = document.createElement('div');
-    n.id = 'appliedin-notification';
-    n.style.cssText = `
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      z-index: 999999;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      transition: opacity 0.3s ease;
-      background: ${type === 'success' ? '#22c55e' : '#f59e0b'};
-      color: white;
-    `;
-    n.innerText = message;
-    document.body.appendChild(n);
+    const url = window.location.href.toLowerCase();
+    const bodyText = document.body.innerText || '';
 
-    setTimeout(() => {
-      n.style.opacity = '0';
-      setTimeout(() => n.remove(), 300);
-    }, 3000);
+    const urlLooksLikeSuccess = url.includes('/success') || url.includes('rstatus=1');
+    const textLooksLikeSuccess = successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
+
+    console.log('[AppliedIn] checkImmediateSuccess:', { urlLooksLikeSuccess, textLooksLikeSuccess });
+
+    if (urlLooksLikeSuccess || textLooksLikeSuccess) {
+      captured = true;
+      setTimeout(() => {
+        const jobData = getJobDetails();
+        console.log('[AppliedIn] jobData extracted:', jobData);
+        if (jobData && jobData.company !== 'Unknown Company') {
+          saveApplication(jobData);
+        } else if (jobData) {
+          console.log('[AppliedIn] company unknown, showing confirm popup');
+          // We know it succeeded (URL/text confirms it) but couldn't
+          // read the company/role — ask the user to fill it in.
+          window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {
+            captured = false;
+          });
+        } else {
+          captured = false;
+        }
+      }, 500);
+    }
   }
+
+  checkImmediateSuccess();
 
   // METHOD 1 — Final submit button
   document.addEventListener('click', function (e) {
@@ -108,8 +127,17 @@
 
       setTimeout(() => {
         const jobData = getJobDetails();
-        if (jobData && jobData.company !== 'Unknown Company') {
+        const bodyText = (document.body.innerText || '').toLowerCase();
+        const url = window.location.href.toLowerCase();
+        const successDetected = successPhrases.some(p => bodyText.includes(p)) ||
+          url.includes('/success') || url.includes('rstatus=1');
+
+        if (jobData && jobData.company !== 'Unknown Company' && successDetected) {
           saveApplication(jobData);
+        } else if (jobData) {
+          window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {
+            captured = false;
+          });
         } else {
           captured = false;
         }
@@ -122,16 +150,6 @@
     if (captured) return;
 
     const bodyText = document.body.innerText || '';
-
-    const successPhrases = [
-      'successfully registered',
-      'registration successful',
-      'successfully applied',
-      'application submitted',
-      'you have registered',
-      'thank you for registering',
-      'participation confirmed'
-    ];
 
     const found = successPhrases.some(phrase =>
       bodyText.toLowerCase().includes(phrase)
