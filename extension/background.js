@@ -104,7 +104,8 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     'application', 'hiring', 'vacancy', 'vacancies',
     'opening', 'openings', 'recruitment', 'work-with-us',
     'join-us', 'join-our-team', 'opportunities', 'workday',
-    'greenhouse', 'lever', 'taleo', 'icims', 'smartrecruiters'
+    'greenhouse', 'lever', 'taleo', 'icims', 'smartrecruiters',
+    'thankyou', 'thank-you', 'thank_you', 'confirmation'
   ];
 
   const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
@@ -170,6 +171,52 @@ function injectUniversalTracker(platformName) {
     'you have registered',
     'application confirmation'
   ];
+
+  // URL patterns that strongly indicate a completed application —
+  // most ATS platforms (Workday, Greenhouse, Oracle-based systems, etc.)
+  // navigate to a URL like this after a real, final submission.
+  const successUrlPatterns = [
+    'thankyou', 'thank-you', 'thank_you', 'applythankyou',
+    'application-submitted', 'applysuccess', 'apply-success',
+    'applicationsuccess', 'confirmation', 'applied=1',
+    'status=success', 'status=offline-success', 'submitted=true'
+  ];
+
+  function urlLooksLikeSuccess() {
+    return successUrlPatterns.some(p => window.location.href.toLowerCase().includes(p));
+  }
+
+  function titleLooksLikeSuccess() {
+    const title = (document.title || '').toLowerCase();
+    return successPhrases.some(phrase => title.includes(phrase)) ||
+      title.includes('thank you');
+  }
+
+  function bodyLooksLikeSuccess() {
+    const bodyText = document.body.innerText || '';
+    return successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
+  }
+
+  function handleDetectedSuccess() {
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
+
+    const jobData = getPageDetails();
+    if (jobData && jobData.confident) {
+      saveApplication(jobData);
+    } else if (jobData) {
+      showConfirmPopup();
+    }
+  }
+
+  // METHOD 0 — Page already loaded directly on a confirmation page.
+  // Many ATS platforms do a full navigation to a "thank you" URL after
+  // the real submit click (which happened on the PREVIOUS page, whose
+  // script instance no longer exists) — so a MutationObserver alone
+  // would never see this, since nothing changes after we attach.
+  if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
+    setTimeout(handleDetectedSuccess, 500);
+  }
 
   // Generic subdomain labels that are never the actual company name —
   // strip these from the front of the hostname before guessing.
@@ -291,20 +338,8 @@ function injectUniversalTracker(platformName) {
 
     setTimeout(() => {
       if (lastHandledUrl === window.location.href) return;
-
-      const bodyText = document.body.innerText || '';
-      const isConfirmed = successPhrases.some(phrase =>
-        bodyText.toLowerCase().includes(phrase)
-      );
-
-      if (isConfirmed) {
-        lastHandledUrl = window.location.href;
-        const jobData = getPageDetails();
-        if (jobData && jobData.confident) {
-          saveApplication(jobData);
-        } else {
-          showConfirmPopup();
-        }
+      if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
+        handleDetectedSuccess();
       }
       // Not confirmed — stay silent, this was likely just a section save
     }, 2000);
@@ -316,22 +351,8 @@ function injectUniversalTracker(platformName) {
   // regardless of which button (if any) triggered it.
   const observer = new MutationObserver(function () {
     if (lastHandledUrl === window.location.href) return;
-
-    const bodyText = document.body.innerText || '';
-    const isConfirmed = successPhrases.some(phrase =>
-      bodyText.toLowerCase().includes(phrase)
-    );
-
-    if (isConfirmed) {
-      lastHandledUrl = window.location.href;
-      setTimeout(() => {
-        const jobData = getPageDetails();
-        if (jobData && jobData.confident) {
-          saveApplication(jobData);
-        } else if (jobData) {
-          showConfirmPopup();
-        }
-      }, 1000);
+    if (bodyLooksLikeSuccess() || urlLooksLikeSuccess()) {
+      setTimeout(handleDetectedSuccess, 1000);
     }
   });
 
