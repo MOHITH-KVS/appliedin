@@ -260,13 +260,84 @@ function injectUniversalTracker(platformName) {
   // popup here rather than auto-saving — this signal is weaker than an
   // exact phrase match, so we ask rather than guess silently.
   function handlePossibleSuccess(formRef) {
-    if (lastHandledUrl === window.location.href) return;
-    if (pageLooksLikeError()) return;
-    if (!hasGenericSuccessElement() && !formDisappeared(formRef)) return;
+    if (lastHandledUrl === window.location.href) return true;
+    if (pageLooksLikeError()) return false;
+    if (!hasGenericSuccessElement() && !formDisappeared(formRef)) return false;
 
     lastHandledUrl = window.location.href;
     const jobData = getPageDetails();
     if (jobData) showConfirmPopup();
+    return true;
+  }
+
+  // Last resort: we saw a submit-like click, but NOTHING — not exact
+  // phrase, not URL, not structural signal — gave us any confidence
+  // about what happened. Rather than silently doing nothing (which
+  // leaves the person unknowingly relying on a save that never
+  // happened), show a small, low-friction nudge they can act on or
+  // ignore, instead of a full popup demanding an answer.
+  function showSoftNudge() {
+    if (document.getElementById('appliedin-nudge')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'appliedin-nudge-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 999996;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    `;
+
+    const nudge = document.createElement('div');
+    nudge.id = 'appliedin-nudge';
+    nudge.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 360px;
+      max-width: 90vw;
+      background: white;
+      border-radius: 16px;
+      padding: 26px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      z-index: 999997;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      border: 1px solid #e5e7eb;
+      text-align: center;
+    `;
+    nudge.innerHTML = `
+      <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">
+        📋 AppliedIn
+      </div>
+      <div style="font-size:15px;color:#4b5563;margin-bottom:22px;line-height:1.5;">
+        Did you just submit an application?<br>We couldn't confirm it automatically.
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button id="appliedin-nudge-log" style="flex:1;padding:12px;background:#4f46e5;color:white;
+          border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
+          Yes, log it
+        </button>
+        <button id="appliedin-nudge-dismiss" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;
+          border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
+          No, dismiss
+        </button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.body.appendChild(nudge);
+
+    document.getElementById('appliedin-nudge-log').addEventListener('click', function () {
+      overlay.remove();
+      nudge.remove();
+      showConfirmPopup();
+    });
+
+    document.getElementById('appliedin-nudge-dismiss').addEventListener('click', function () {
+      overlay.remove();
+      nudge.remove();
+    });
   }
 
   // METHOD 0 — Page already loaded directly on a confirmation page.
@@ -404,12 +475,20 @@ function injectUniversalTracker(platformName) {
       if (lastHandledUrl === window.location.href) return;
       if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
         handleDetectedSuccess();
-      } else {
-        // No exact phrase/URL matched — fall back to structural signals
-        // (form gone, or a success-styled element appeared) rather than
-        // going completely silent. Always asks via popup here, never
-        // auto-saves, since this signal is weaker than an exact match.
-        handlePossibleSuccess(formRef);
+        return;
+      }
+
+      // No exact phrase/URL matched — fall back to structural signals
+      // (form gone, or a success-styled element appeared) rather than
+      // going completely silent. Always asks via popup here, never
+      // auto-saves, since this signal is weaker than an exact match.
+      const handled = handlePossibleSuccess(formRef);
+
+      if (!handled) {
+        // Nothing gave us any confidence at all. Rather than silently
+        // doing nothing, surface a small dismissible nudge so the person
+        // knows to check — instead of unknowingly assuming it saved.
+        showSoftNudge();
       }
     }, 2500);
   });
