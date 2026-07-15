@@ -126,6 +126,9 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           color:#111827;outline:none;" />
+        <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
+          ✏️ If the details above look wrong, feel free to edit them before saving.
+        </div>
       </div>
       <div style="display:flex;gap:10px;">
         <button id="appliedin-yes"

@@ -171,35 +171,71 @@ function injectUniversalTracker(platformName) {
     'application confirmation'
   ];
 
+  // Generic subdomain labels that are never the actual company name —
+  // strip these from the front of the hostname before guessing.
+  const GENERIC_SUBDOMAINS = [
+    'www', 'account', 'accounts', 'apply', 'jobs', 'careers', 'career',
+    'portal', 'my', 'app', 'id', 'signin', 'login', 'auth', 'recruiting',
+    'recruit', 'talent', 'hire', 'hiring', 'candidate', 'candidates'
+  ];
+
+  // Generic headings that are UI chrome, not a job title — never trust
+  // these as the role even if they're in an <h1>/<h2>.
+  const GENERIC_HEADINGS = [
+    'apply', 'submit', 'continue', 'home', 'login', 'sign in', 'sign up',
+    'welcome', 'my progress', 'applications', 'profile', 'dashboard',
+    'search', 'get started', 'next', 'back', 'save'
+  ];
+
+  function guessCompanyFromHostname() {
+    const parts = new URL(window.location.href).hostname
+      .split('.')
+      .filter(Boolean);
+
+    // Drop generic labels from the front (e.g. "account.amazon.jobs" -> "amazon.jobs")
+    while (parts.length > 1 && GENERIC_SUBDOMAINS.includes(parts[0].toLowerCase())) {
+      parts.shift();
+    }
+
+    const candidate = parts[0] || '';
+    if (!candidate || GENERIC_SUBDOMAINS.includes(candidate.toLowerCase())) return null;
+    return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+  }
+
   function getPageDetails() {
     try {
-      const title =
-        document.querySelector('h1')?.innerText?.trim() ||
-        document.querySelector('h2')?.innerText?.trim() ||
-        document.title?.trim() ||
-        'Unknown Role';
+      const metaCompany =
+        document.querySelector('meta[property="og:site_name"]')?.content?.trim() ||
+        document.querySelector('meta[name="author"]')?.content?.trim() ||
+        null;
 
-      const companyMeta =
-        document.querySelector('meta[property="og:site_name"]')?.content ||
-        document.querySelector('meta[name="author"]')?.content ||
-        '';
+      const hostnameCompany = guessCompanyFromHostname();
+      const company = metaCompany || hostnameCompany || 'Unknown Company';
 
-      const company = companyMeta ||
-        new URL(window.location.href).hostname
-          .replace('www.', '')
-          .replace('careers.', '')
-          .replace('jobs.', '')
-          .split('.')[0] ||
-        'Unknown Company';
+      const titleCandidates = [
+        document.querySelector('meta[property="og:title"]')?.content?.trim(),
+        document.querySelector('h1')?.innerText?.trim(),
+        document.querySelector('h2')?.innerText?.trim(),
+        document.title?.trim()
+      ];
+      const role = titleCandidates.find(t =>
+        t && t.length > 3 && !GENERIC_HEADINGS.includes(t.toLowerCase())
+      ) || 'Unknown Role';
+
+      // "Confident" means we're comfortable auto-saving without asking —
+      // require both a real company (not just a hostname guess) and a
+      // real role, not just fallback text.
+      const confident = !!metaCompany && company !== 'Unknown Company' && role !== 'Unknown Role';
 
       return {
-        company: company.charAt(0).toUpperCase() + company.slice(1),
-        role: title.substring(0, 100),
+        company,
+        role: role.substring(0, 100),
         location: 'Unknown Location',
         platform: platformName,
         url: window.location.href,
         date: new Date().toISOString(),
-        status: 'Applied'
+        status: 'Applied',
+        confident
       };
     } catch (e) {
       return null;
@@ -228,8 +264,14 @@ function injectUniversalTracker(platformName) {
     });
   }
 
-  // METHOD 1 — Detect submit button click
-  // Shows confirmation popup to verify before saving
+  // METHOD 1 — Fast path: if a submit-like click is immediately followed
+  // by real confirmation text, save right away without waiting for the
+  // MutationObserver. If confirmation ISN'T found, we do nothing here —
+  // deliberately no popup fallback in this handler, because many
+  // multi-section forms (e.g. Amazon Jobs) have their own per-section
+  // "Submit" buttons that aren't the final application submission.
+  // Method 2 below is the real authority: it only acts once genuine
+  // success text actually appears anywhere on the page.
   document.addEventListener('click', function (e) {
     if (lastHandledUrl === window.location.href) return;
 
@@ -247,28 +289,31 @@ function injectUniversalTracker(platformName) {
     const isSubmitButton = submitTexts.some(t => text === t || text.includes(t));
     if (!isSubmitButton) return;
 
-    // Wait for page to show confirmation
     setTimeout(() => {
+      if (lastHandledUrl === window.location.href) return;
+
       const bodyText = document.body.innerText || '';
       const isConfirmed = successPhrases.some(phrase =>
         bodyText.toLowerCase().includes(phrase)
       );
 
       if (isConfirmed) {
-        if (lastHandledUrl === window.location.href) return;
         lastHandledUrl = window.location.href;
-        // Auto save — confirmation detected
         const jobData = getPageDetails();
-        if (jobData) saveApplication(jobData);
-      } else if (lastHandledUrl !== window.location.href) {
-        lastHandledUrl = window.location.href;
-        // Not confident — ask the user instead of silently dropping it
-        showConfirmPopup();
+        if (jobData && jobData.confident) {
+          saveApplication(jobData);
+        } else {
+          showConfirmPopup();
+        }
       }
+      // Not confirmed — stay silent, this was likely just a section save
     }, 2000);
   });
 
-  // METHOD 2 — Watch DOM for success confirmation message
+  // METHOD 2 — Watch DOM for genuine success confirmation message.
+  // This is the real authority for both auto-save and the popup fallback —
+  // it only fires once real confirmation text is actually on the page,
+  // regardless of which button (if any) triggered it.
   const observer = new MutationObserver(function () {
     if (lastHandledUrl === window.location.href) return;
 
@@ -281,7 +326,11 @@ function injectUniversalTracker(platformName) {
       lastHandledUrl = window.location.href;
       setTimeout(() => {
         const jobData = getPageDetails();
-        if (jobData) saveApplication(jobData);
+        if (jobData && jobData.confident) {
+          saveApplication(jobData);
+        } else if (jobData) {
+          showConfirmPopup();
+        }
       }, 1000);
     }
   });
@@ -349,6 +398,9 @@ function injectUniversalTracker(platformName) {
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           color:#111827;outline:none;" />
+        <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
+          ✏️ If the details above look wrong, feel free to edit them before saving.
+        </div>
       </div>
       <div style="display:flex;gap:10px;">
         <button id="appliedin-yes"
