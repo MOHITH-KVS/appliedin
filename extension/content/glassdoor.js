@@ -20,7 +20,9 @@
     'your application has been sent',
     'you\'ve applied',
     'application complete',
-    'thank you for applying'
+    'thank you for applying',
+    'has been submitted',
+    'has been received'
   ];
 
   function getJobDetails() {

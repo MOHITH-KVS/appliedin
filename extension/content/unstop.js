@@ -24,7 +24,9 @@
     'application submitted',
     'you have registered',
     'thank you for registering',
-    'participation confirmed'
+    'participation confirmed',
+    'has been submitted',
+    'has been received'
   ];
 
   function isGenericText(text) {

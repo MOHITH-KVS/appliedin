@@ -169,7 +169,14 @@ function injectUniversalTracker(platformName) {
     'thank you for registering',
     'participation confirmed',
     'you have registered',
-    'application confirmation'
+    'application confirmation',
+    // Broader fragments to catch phrasing like "your application has been
+    // submitted" / "your resume has been received" that the more rigid
+    // two-word phrases above miss.
+    'has been submitted',
+    'has been received',
+    'has been sent',
+    'successfully received'
   ];
 
   // URL patterns that strongly indicate a completed application —
@@ -197,6 +204,45 @@ function injectUniversalTracker(platformName) {
     return successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
   }
 
+  // Words that indicate a FAILED submission (validation error, etc.) —
+  // if any of these are present, don't treat structural changes as success.
+  const errorIndicators = [
+    'required field', 'is required', 'please fill', 'please enter',
+    'invalid', 'error occurred', 'something went wrong', 'failed to',
+    'try again', 'please correct', 'field is empty'
+  ];
+
+  function pageLooksLikeError() {
+    const bodyText = (document.body.innerText || '').toLowerCase();
+    return errorIndicators.some(phrase => bodyText.includes(phrase));
+  }
+
+  // Structural, language-independent success signal: an element whose
+  // class or id names sound like a success/confirmation box. Developers
+  // use these naming conventions constantly regardless of what the
+  // visible text actually says, so this catches wording we could never
+  // fully enumerate.
+  function hasGenericSuccessElement() {
+    const el = document.querySelector(
+      '[class*="success" i], [class*="thank-you" i], [class*="thankyou" i], ' +
+      '[class*="confirmation" i], [id*="success" i], [id*="thank-you" i], ' +
+      '[id*="confirmation" i], [class*="submitted" i]'
+    );
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  }
+
+  // Structural signal #2: the form the user just submitted has vanished
+  // from the page — a near-universal pattern after a real submission,
+  // regardless of what confirmation text (if any) replaces it.
+  function formDisappeared(formRef) {
+    if (!formRef) return false;
+    if (!document.body.contains(formRef)) return true;
+    const style = window.getComputedStyle(formRef);
+    return style.display === 'none' || style.visibility === 'hidden';
+  }
+
   function handleDetectedSuccess() {
     if (lastHandledUrl === window.location.href) return;
     lastHandledUrl = window.location.href;
@@ -207,6 +253,20 @@ function injectUniversalTracker(platformName) {
     } else if (jobData) {
       showConfirmPopup();
     }
+  }
+
+  // Fallback for when no exact phrase/URL matched, but the page structure
+  // still strongly suggests a real submission happened. Always shows the
+  // popup here rather than auto-saving — this signal is weaker than an
+  // exact phrase match, so we ask rather than guess silently.
+  function handlePossibleSuccess(formRef) {
+    if (lastHandledUrl === window.location.href) return;
+    if (pageLooksLikeError()) return;
+    if (!hasGenericSuccessElement() && !formDisappeared(formRef)) return;
+
+    lastHandledUrl = window.location.href;
+    const jobData = getPageDetails();
+    if (jobData) showConfirmPopup();
   }
 
   // METHOD 0 — Page already loaded directly on a confirmation page.
@@ -336,13 +396,22 @@ function injectUniversalTracker(platformName) {
     const isSubmitButton = submitTexts.some(t => text === t || text.includes(t));
     if (!isSubmitButton) return;
 
+    // Capture the form now, before anything changes — used as a
+    // language-independent fallback signal if no phrase/URL matches.
+    const formRef = element.closest('form');
+
     setTimeout(() => {
       if (lastHandledUrl === window.location.href) return;
       if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
         handleDetectedSuccess();
+      } else {
+        // No exact phrase/URL matched — fall back to structural signals
+        // (form gone, or a success-styled element appeared) rather than
+        // going completely silent. Always asks via popup here, never
+        // auto-saves, since this signal is weaker than an exact match.
+        handlePossibleSuccess(formRef);
       }
-      // Not confirmed — stay silent, this was likely just a section save
-    }, 2000);
+    }, 2500);
   });
 
   // METHOD 2 — Watch DOM for genuine success confirmation message.
@@ -469,6 +538,10 @@ function injectUniversalTracker(platformName) {
     document.getElementById('appliedin-no').addEventListener('click', function () {
       overlay.remove();
       popup.remove();
+      // This wasn't actually a completion — allow a later, genuine
+      // submission on this same page (common on multi-section forms
+      // like Amazon Jobs) to still be caught instead of going silent.
+      lastHandledUrl = null;
     });
   }
 

@@ -66,7 +66,9 @@
     'successfully applied',
     'you have applied',
     'your application has been submitted',
-    'applied successfully'
+    'applied successfully',
+    'has been submitted',
+    'has been received'
   ];
 
   function cachePendingJob(jobData) {

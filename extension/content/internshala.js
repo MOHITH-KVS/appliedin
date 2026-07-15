@@ -47,7 +47,9 @@
     'you have applied',
     'your application has been sent',
     'application sent successfully',
-    'thank you for applying'
+    'thank you for applying',
+    'has been submitted',
+    'has been received'
   ];
 
   function saveApplication(jobData) {
