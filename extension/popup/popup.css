@@ -64,6 +64,26 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.stat:hover {
+  background: #eef2ff;
+}
+
+.stat.active {
+  background: #6366f1;
+}
+
+.stat.active .stat-value {
+  color: #ffffff;
+}
+
+.stat.active .stat-label {
+  color: #e0e7ff;
 }
 
 .stat-value {

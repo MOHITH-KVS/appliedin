@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   let allApplications = [];
   let currentFilter = 'all';
+  let currentDateFilter = 'all';
   let currentSearch = '';
   let currentExportType = ''; // 'csv' or 'excel'
 
@@ -93,7 +94,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const list = document.getElementById('applicationsList');
     const emptyState = document.getElementById('emptyState');
 
-    let filtered = allApplications;
+    let filtered = currentDateFilter !== 'all' ? filterByPeriod(currentDateFilter) : allApplications;
 
     if (currentFilter !== 'all') {
       filtered = filtered.filter(app => app.status === currentFilter);
@@ -198,6 +199,25 @@ document.addEventListener('DOMContentLoaded', function () {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       this.classList.add('active');
       currentFilter = this.dataset.filter;
+      renderApplications();
+    });
+  });
+
+  // ── Stat Boxes as Date Filters ──
+  document.querySelectorAll('.stat[data-period]').forEach(function (stat) {
+    stat.addEventListener('click', function () {
+      const period = this.dataset.period;
+
+      if (currentDateFilter === period) {
+        // Clicking the already-active one clears the filter
+        currentDateFilter = 'all';
+        document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
+      } else {
+        currentDateFilter = period;
+        document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
+        this.classList.add('active');
+      }
+
       renderApplications();
     });
   });
@@ -395,12 +415,23 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!isoString) return '';
     const date = new Date(isoString);
     const now = new Date();
-    const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+    // Calendar-day boundaries, not a rolling 24h window — an application
+    // from 10pm yesterday should say "Yesterday", not "Today", even
+    // though fewer than 24 raw hours have passed since then.
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+
+    const entryDayStart = new Date(date);
+    entryDayStart.setHours(0, 0, 0, 0);
+
+    const dayDiff = Math.round((todayStart - entryDayStart) / (1000 * 60 * 60 * 24));
     const time = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
-    if (diff === 0) return `Today, ${time}`;
-    if (diff === 1) return `Yesterday, ${time}`;
-    if (diff < 7) return `${diff} days ago, ${time}`;
-    if (diff < 30) return `${Math.floor(diff / 7)} weeks ago`;
+
+    if (dayDiff === 0) return `Today, ${time}`;
+    if (dayDiff === 1) return `Yesterday, ${time}`;
+    if (dayDiff < 7) return `${dayDiff} days ago, ${time}`;
+    if (dayDiff < 30) return `${Math.floor(dayDiff / 7)} weeks ago`;
     return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   }
 

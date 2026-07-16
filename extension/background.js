@@ -108,7 +108,13 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     'thankyou', 'thank-you', 'thank_you', 'confirmation'
   ];
 
-  const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
+  // Google Forms is a common way companies (especially for off-campus
+  // hiring in India) collect applications, but its URLs are auto-generated
+  // IDs like docs.google.com/forms/d/e/1FAIpQLS.../viewform — they never
+  // contain any job-related keyword, so they need an explicit check.
+  const isGoogleForm = url.includes('docs.google.com/forms/');
+
+  const isJobPage = isGoogleForm || jobKeywords.some(keyword => url.includes(keyword));
   if (!isJobPage) return;
 
   // Inject universal tracker into this page
@@ -176,7 +182,9 @@ function injectUniversalTracker(platformName) {
     'has been submitted',
     'has been received',
     'has been sent',
-    'successfully received'
+    'successfully received',
+    // Google Forms' standard confirmation text
+    'your response has been recorded'
   ];
 
   // URL patterns that strongly indicate a completed application —
@@ -341,11 +349,14 @@ function injectUniversalTracker(platformName) {
   }
 
   // METHOD 0 — Page already loaded directly on a confirmation page.
-  // Many ATS platforms do a full navigation to a "thank you" URL after
-  // the real submit click (which happened on the PREVIOUS page, whose
-  // script instance no longer exists) — so a MutationObserver alone
-  // would never see this, since nothing changes after we attach.
-  if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
+  // Deliberately checking URL/title ONLY here, not body text — a page
+  // like an "Applications" dashboard permanently displays status text
+  // such as "Application submitted" for applications from days ago, and
+  // trusting body text on load alone would re-trigger every single time
+  // that page is revisited. URL and tab title are reliable because they
+  // specifically indicate a fresh post-submission redirect, not just a
+  // page someone is casually browsing back to.
+  if (urlLooksLikeSuccess() || titleLooksLikeSuccess()) {
     setTimeout(handleDetectedSuccess, 500);
   }
 
@@ -365,8 +376,21 @@ function injectUniversalTracker(platformName) {
     'search', 'get started', 'next', 'back', 'save'
   ];
 
+  // Hosts that are form/survey PLATFORMS, not companies — guessing a
+  // company name from these hostnames would produce nonsense like
+  // "Docs" or "Forms". These generic form builders never tell us who
+  // the actual employer is, so we deliberately leave company unknown
+  // and let the popup ask instead of guessing wrong.
+  const FORM_PLATFORM_HOSTS = [
+    'docs.google.com', 'forms.gle', 'forms.office.com',
+    'typeform.com', 'jotform.com', 'airtable.com'
+  ];
+
   function guessCompanyFromHostname() {
-    const parts = new URL(window.location.href).hostname
+    const hostname = new URL(window.location.href).hostname;
+    if (FORM_PLATFORM_HOSTS.some(h => hostname.includes(h))) return null;
+
+    const parts = hostname
       .split('.')
       .filter(Boolean);
 
@@ -493,13 +517,35 @@ function injectUniversalTracker(platformName) {
     }, 2500);
   });
 
+  // Snapshot: was success text already present the moment this script
+  // loaded? If so, it's very likely a persistent status label (e.g. an
+  // "Applications" dashboard showing "Application submitted" for
+  // something from days ago) rather than a fresh confirmation — so we
+  // must only react to text that's genuinely NEW, not merely present.
+  let bodyAlreadyHadSuccessTextOnLoad = bodyLooksLikeSuccess();
+
   // METHOD 2 — Watch DOM for genuine success confirmation message.
   // This is the real authority for both auto-save and the popup fallback —
-  // it only fires once real confirmation text is actually on the page,
-  // regardless of which button (if any) triggered it.
+  // it only fires once real confirmation text NEWLY appears, regardless
+  // of which button (if any) triggered it.
   const observer = new MutationObserver(function () {
     if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeSuccess() || urlLooksLikeSuccess()) {
+
+    const currentlyHasSuccessText = bodyLooksLikeSuccess();
+
+    // Only react to a transition from absent -> present, never to text
+    // that was already sitting on the page when we started observing.
+    if (currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad) {
+      setTimeout(handleDetectedSuccess, 1000);
+      return;
+    }
+
+    // Keep the baseline in sync — if the text disappears (e.g. a
+    // dashboard entry gets removed) a later genuine reappearance should
+    // still be able to trigger.
+    bodyAlreadyHadSuccessTextOnLoad = currentlyHasSuccessText;
+
+    if (urlLooksLikeSuccess()) {
       setTimeout(handleDetectedSuccess, 1000);
     }
   });
