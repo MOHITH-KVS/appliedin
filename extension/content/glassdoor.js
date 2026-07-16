@@ -27,18 +27,23 @@
 
   function getJobDetails() {
     try {
+      const structured = window.__appliedinCommon?.getStructuredJobData?.();
+
       const title =
+        structured?.title ||
         document.querySelector('[data-test="job-title"]')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
         'Unknown Role';
 
       const company =
+        structured?.company ||
         document.querySelector('[data-test="employer-name"]')?.innerText?.trim() ||
         document.querySelector('[class*="employerName"]')?.innerText?.trim() ||
         'Unknown Company';
 
       const location =
+        structured?.location ||
         document.querySelector('[data-test="job-location"]')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
@@ -161,12 +166,16 @@
     }
   });
 
-  // METHOD 2 — Watch for success message appearing in the DOM
+  // METHOD 2 — Watch for success message appearing in the DOM (debounced)
+  let mutationDebounce = null;
   const observer = new MutationObserver(function () {
-    if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeFinalSuccess()) {
-      setTimeout(handleFinalSuccess, 1000);
-    }
+    clearTimeout(mutationDebounce);
+    mutationDebounce = setTimeout(() => {
+      if (lastHandledUrl === window.location.href) return;
+      if (bodyLooksLikeFinalSuccess()) {
+        setTimeout(handleFinalSuccess, 1000);
+      }
+    }, 400);
   });
 
   observer.observe(document.body, {

@@ -34,18 +34,23 @@
 
   function getJobDetailsFromListingPage() {
     try {
+      const structured = window.__appliedinCommon?.getStructuredJobData?.();
+
       const title =
+        structured?.title ||
         document.querySelector('.jobsearch-JobInfoHeader-title')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
         null;
 
       const company =
+        structured?.company ||
         document.querySelector('[data-company-name="true"]')?.innerText?.trim() ||
         document.querySelector('[class*="companyName"]')?.innerText?.trim() ||
         null;
 
       const location =
+        structured?.location ||
         document.querySelector('[data-testid="job-location"]')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';

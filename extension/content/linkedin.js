@@ -27,9 +27,11 @@
 
   function getJobDetails() {
     try {
+      const structured = window.__appliedinCommon?.getStructuredJobData?.();
       const tabTitle = getDetailsFromTabTitle();
 
       const title =
+        structured?.title ||
         document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
         document.querySelector('h1.t-24')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
@@ -37,6 +39,7 @@
         'Unknown Role';
 
       const company =
+        structured?.company ||
         document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
         document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
         document.querySelector('a[href*="/company/"]')?.innerText?.trim() ||
@@ -44,6 +47,7 @@
         'Unknown Company';
 
       const location =
+        structured?.location ||
         document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() ||
         'Unknown Location';
 
@@ -173,12 +177,18 @@
     }
   });
 
-  // Watch for success confirmation message in DOM
+  // Watch for success confirmation message in DOM. Debounced so a page
+  // with lots of incidental mutations (ads, trackers) doesn't trigger a
+  // full-text rescan on every single one.
+  let mutationDebounce = null;
   const observer = new MutationObserver(function () {
-    if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeSuccess()) {
-      setTimeout(handleSuccess, 1000);
-    }
+    clearTimeout(mutationDebounce);
+    mutationDebounce = setTimeout(() => {
+      if (lastHandledUrl === window.location.href) return;
+      if (bodyLooksLikeSuccess()) {
+        setTimeout(handleSuccess, 1000);
+      }
+    }, 400);
   });
 
   observer.observe(document.body, {

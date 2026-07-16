@@ -37,7 +37,10 @@
 
   function getJobDetails() {
     try {
+      const structured = window.__appliedinCommon?.getStructuredJobData?.();
+
       const titleCandidates = [
+        structured?.title,
         document.querySelector('.opportunity-heading')?.innerText?.trim(),
         document.querySelector('[class*="opportunity-title"]')?.innerText?.trim(),
         document.querySelector('h3')?.innerText?.trim(),
@@ -46,6 +49,7 @@
       const title = titleCandidates.find(t => t && !isGenericText(t)) || 'Unknown Role';
 
       const companyCandidates = [
+        structured?.company,
         document.querySelector('.company-name')?.innerText?.trim(),
         document.querySelector('[class*="org-name"]')?.innerText?.trim(),
         document.querySelector('[class*="company"]')?.innerText?.trim()
@@ -53,6 +57,7 @@
       const company = companyCandidates.find(c => c && !isGenericText(c)) || 'Unknown Company';
 
       const location =
+        structured?.location ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
 
@@ -183,12 +188,16 @@
     }
   });
 
-  // METHOD 2 — Watch for success message appearing in the DOM
+  // METHOD 2 — Watch for success message appearing in the DOM (debounced)
+  let mutationDebounce = null;
   const observer = new MutationObserver(function () {
-    if (lastHandledUrl === window.location.href) return;
-    if (textLooksLikeSuccess()) {
-      setTimeout(handleSuccess, 1000);
-    }
+    clearTimeout(mutationDebounce);
+    mutationDebounce = setTimeout(() => {
+      if (lastHandledUrl === window.location.href) return;
+      if (textLooksLikeSuccess()) {
+        setTimeout(handleSuccess, 1000);
+      }
+    }, 400);
   });
 
   observer.observe(document.body, {

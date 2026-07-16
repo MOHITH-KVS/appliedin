@@ -404,9 +404,59 @@ function injectUniversalTracker(platformName) {
     return candidate.charAt(0).toUpperCase() + candidate.slice(1);
   }
 
+  // Many job sites embed JobPosting structured data (schema.org) inside
+  // a <script type="application/ld+json"> tag, specifically so Google's
+  // job search can index them. This is far more reliable than guessing
+  // from CSS classes or hostnames — when present, treat it as ground truth.
+  function getStructuredJobData() {
+    try {
+      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const script of scripts) {
+        let data;
+        try {
+          data = JSON.parse(script.textContent);
+        } catch (e) {
+          continue;
+        }
+
+        const items = Array.isArray(data) ? data : (data['@graph'] || [data]);
+
+        for (const item of items) {
+          if (!item) continue;
+          const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
+          if (!types.includes('JobPosting')) continue;
+
+          const title = item.title || null;
+
+          const org = item.hiringOrganization;
+          const company = (org && (org.name || (typeof org === 'string' ? org : null))) || null;
+
+          let location = null;
+          const loc = item.jobLocation;
+          const locEntry = Array.isArray(loc) ? loc[0] : loc;
+          const address = locEntry && locEntry.address;
+          if (address) {
+            location = [address.addressLocality, address.addressRegion, address.addressCountry]
+              .filter(Boolean).join(', ');
+          }
+
+          if (title || company) {
+            return { title, company, location: location || null };
+          }
+        }
+      }
+    } catch (e) {
+      // best-effort enhancement, not critical path
+    }
+    return null;
+  }
+
   function getPageDetails() {
     try {
+      const structured = getStructuredJobData();
+
       const metaCompany =
+        structured?.company ||
         document.querySelector('meta[property="og:site_name"]')?.content?.trim() ||
         document.querySelector('meta[name="author"]')?.content?.trim() ||
         null;
@@ -415,6 +465,7 @@ function injectUniversalTracker(platformName) {
       const company = metaCompany || hostnameCompany || 'Unknown Company';
 
       const titleCandidates = [
+        structured?.title,
         document.querySelector('meta[property="og:title"]')?.content?.trim(),
         document.querySelector('h1')?.innerText?.trim(),
         document.querySelector('h2')?.innerText?.trim(),
@@ -425,14 +476,17 @@ function injectUniversalTracker(platformName) {
       ) || 'Unknown Role';
 
       // "Confident" means we're comfortable auto-saving without asking —
-      // require both a real company (not just a hostname guess) and a
-      // real role, not just fallback text.
-      const confident = !!metaCompany && company !== 'Unknown Company' && role !== 'Unknown Role';
+      // structured JobPosting data (when present) is trustworthy on its
+      // own; otherwise require both a real company (not just a hostname
+      // guess) and a real role, not just fallback text.
+      const confident =
+        (!!structured?.company && !!structured?.title) ||
+        (!!metaCompany && company !== 'Unknown Company' && role !== 'Unknown Role');
 
       return {
         company,
         role: role.substring(0, 100),
-        location: 'Unknown Location',
+        location: structured?.location || 'Unknown Location',
         platform: platformName,
         url: window.location.href,
         date: new Date().toISOString(),
@@ -448,11 +502,16 @@ function injectUniversalTracker(platformName) {
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
-      const isDuplicate = applications.some(app =>
-        app.company.toLowerCase() === jobData.company.toLowerCase() &&
-        app.role.toLowerCase() === jobData.role.toLowerCase() &&
-        (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-      );
+      const isDuplicate = applications.some(app => {
+        // Same exact job URL — definitely a duplicate, regardless of when
+        if (jobData.url && app.url && app.url === jobData.url) return true;
+
+        return (
+          app.company.toLowerCase() === jobData.company.toLowerCase() &&
+          app.role.toLowerCase() === jobData.role.toLowerCase() &&
+          (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
+        );
+      });
 
       if (isDuplicate) {
         showToast('⚠️ Already applied here recently!', '#f59e0b');
@@ -527,27 +586,33 @@ function injectUniversalTracker(platformName) {
   // METHOD 2 — Watch DOM for genuine success confirmation message.
   // This is the real authority for both auto-save and the popup fallback —
   // it only fires once real confirmation text NEWLY appears, regardless
-  // of which button (if any) triggered it.
+  // of which button (if any) triggered it. Debounced so busy pages
+  // (ads, trackers, live-updating widgets) don't trigger a full-text
+  // rescan on every single incidental mutation.
+  let mutationDebounce = null;
   const observer = new MutationObserver(function () {
-    if (lastHandledUrl === window.location.href) return;
+    clearTimeout(mutationDebounce);
+    mutationDebounce = setTimeout(() => {
+      if (lastHandledUrl === window.location.href) return;
 
-    const currentlyHasSuccessText = bodyLooksLikeSuccess();
+      const currentlyHasSuccessText = bodyLooksLikeSuccess();
 
-    // Only react to a transition from absent -> present, never to text
-    // that was already sitting on the page when we started observing.
-    if (currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad) {
-      setTimeout(handleDetectedSuccess, 1000);
-      return;
-    }
+      // Only react to a transition from absent -> present, never to text
+      // that was already sitting on the page when we started observing.
+      if (currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad) {
+        setTimeout(handleDetectedSuccess, 1000);
+        return;
+      }
 
-    // Keep the baseline in sync — if the text disappears (e.g. a
-    // dashboard entry gets removed) a later genuine reappearance should
-    // still be able to trigger.
-    bodyAlreadyHadSuccessTextOnLoad = currentlyHasSuccessText;
+      // Keep the baseline in sync — if the text disappears (e.g. a
+      // dashboard entry gets removed) a later genuine reappearance should
+      // still be able to trigger.
+      bodyAlreadyHadSuccessTextOnLoad = currentlyHasSuccessText;
 
-    if (urlLooksLikeSuccess()) {
-      setTimeout(handleDetectedSuccess, 1000);
-    }
+      if (urlLooksLikeSuccess()) {
+        setTimeout(handleDetectedSuccess, 1000);
+      }
+    }, 400);
   });
 
   observer.observe(document.body, {

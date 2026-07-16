@@ -10,19 +10,24 @@
 
   function getJobDetails() {
     try {
+      const structured = window.__appliedinCommon?.getStructuredJobData?.();
+
       const title =
+        structured?.title ||
         document.querySelector('.profile')?.innerText?.trim() ||
         document.querySelector('[class*="profile-title"]')?.innerText?.trim() ||
         document.querySelector('h1')?.innerText?.trim() ||
         'Unknown Role';
 
       const company =
+        structured?.company ||
         document.querySelector('.company-name a')?.innerText?.trim() ||
         document.querySelector('.company-name')?.innerText?.trim() ||
         document.querySelector('[class*="company"]')?.innerText?.trim() ||
         'Unknown Company';
 
       const location =
+        structured?.location ||
         document.querySelector('.location_link')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Work From Home';
@@ -37,7 +42,17 @@
         status: 'Applied'
       };
     } catch (e) {
-      return null;
+      // Even on error, return SOMETHING so a popup can still be shown —
+      // never go completely silent.
+      return {
+        company: 'Unknown Company',
+        role: 'Unknown Role',
+        location: 'Work From Home',
+        platform: 'Internshala',
+        url: window.location.href,
+        date: new Date().toISOString(),
+        status: 'Applied'
+      };
     }
   }
 
@@ -105,12 +120,16 @@
     }
   });
 
-  // METHOD 2 — Watch for success message
+  // METHOD 2 — Watch for success message (debounced)
+  let mutationDebounce = null;
   const observer = new MutationObserver(function () {
-    if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeSuccess()) {
-      setTimeout(handleSuccess, 1000);
-    }
+    clearTimeout(mutationDebounce);
+    mutationDebounce = setTimeout(() => {
+      if (lastHandledUrl === window.location.href) return;
+      if (bodyLooksLikeSuccess()) {
+        setTimeout(handleSuccess, 1000);
+      }
+    }, 400);
   });
 
   observer.observe(document.body, {

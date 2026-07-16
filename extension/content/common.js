@@ -11,11 +11,18 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
-      const isDuplicate = applications.some(app =>
-        app.company.toLowerCase() === jobData.company.toLowerCase() &&
-        app.role.toLowerCase() === jobData.role.toLowerCase() &&
-        (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-      );
+      const isDuplicate = applications.some(app => {
+        // Same exact job URL — definitely a duplicate, regardless of when
+        if (jobData.url && app.url && app.url === jobData.url) return true;
+
+        // Same company + role within the last 24 hours — likely a
+        // duplicate detection firing twice on the same real application
+        return (
+          app.company.toLowerCase() === jobData.company.toLowerCase() &&
+          app.role.toLowerCase() === jobData.role.toLowerCase() &&
+          (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
+        );
+      });
 
       if (isDuplicate) {
         console.log('[AppliedIn] duplicate detected, not saving');
@@ -179,5 +186,53 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     });
   }
 
-  return { saveApplication, showNotification, showConfirmPopup };
+  // Many job sites embed JobPosting structured data (schema.org) inside
+  // a <script type="application/ld+json"> tag, specifically so Google's
+  // job search can index them. This is far more reliable than guessing
+  // from CSS classes (which change often) or hostnames (which are
+  // sometimes generic) — when present, it's closer to ground truth.
+  function getStructuredJobData() {
+    try {
+      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const script of scripts) {
+        let data;
+        try {
+          data = JSON.parse(script.textContent);
+        } catch (e) {
+          continue;
+        }
+
+        const items = Array.isArray(data) ? data : (data['@graph'] || [data]);
+
+        for (const item of items) {
+          if (!item) continue;
+          const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
+          if (!types.includes('JobPosting')) continue;
+
+          const title = item.title || null;
+
+          const org = item.hiringOrganization;
+          const company = (org && (org.name || (typeof org === 'string' ? org : null))) || null;
+
+          let location = null;
+          const loc = item.jobLocation;
+          const locEntry = Array.isArray(loc) ? loc[0] : loc;
+          const address = locEntry && locEntry.address;
+          if (address) {
+            location = [address.addressLocality, address.addressRegion, address.addressCountry]
+              .filter(Boolean).join(', ');
+          }
+
+          if (title || company) {
+            return { title, company, location: location || null };
+          }
+        }
+      }
+    } catch (e) {
+      // ignore — this is a best-effort enhancement, not critical path
+    }
+    return null;
+  }
+
+  return { saveApplication, showNotification, showConfirmPopup, getStructuredJobData };
 })();
