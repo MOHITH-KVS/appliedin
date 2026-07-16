@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', function () {
   let currentSearch = '';
   let currentExportType = ''; // 'csv' or 'excel'
 
+  // ── Show current version — makes it obvious at a glance whether a
+  // reloaded/updated extension is actually the one running ──
+  const versionEl = document.getElementById('appVersion');
+  if (versionEl) {
+    versionEl.textContent = 'v' + chrome.runtime.getManifest().version;
+  }
+
   // ── Load Applications ──
   function loadApplications() {
     chrome.storage.local.get(['applications'], function (result) {
