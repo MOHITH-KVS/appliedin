@@ -34,7 +34,7 @@
         structured?.title ||
         document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
         document.querySelector('h1.t-24')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
         tabTitle.role ||
         'Unknown Role';
 
@@ -134,7 +134,7 @@
       const jobData = pendingJob || getJobDetails();
       console.log('[AppliedIn] jobData for save:', jobData);
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {

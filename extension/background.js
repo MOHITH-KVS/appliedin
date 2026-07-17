@@ -115,15 +115,23 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   const isGoogleForm = url.includes('docs.google.com/forms/');
 
   const isJobPage = isGoogleForm || jobKeywords.some(keyword => url.includes(keyword));
+
+  if (isGoogleForm) {
+    console.log('[AppliedIn] Google Form detected, injecting tracker:', url);
+  }
+
   if (!isJobPage) return;
 
   // Inject universal tracker into this page
+  // allFrames: true so an embedded Google Form (or other iframe-based
+  // application widget) inside a company's careers page gets covered too —
+  // the top-level tab URL alone wouldn't reveal what's embedded in it.
   chrome.scripting.executeScript({
-    target: { tabId: tabId },
+    target: { tabId: tabId, allFrames: true },
     func: injectUniversalTracker,
     args: [detectPlatform(tab.url)]
-  }).catch(() => {
-    // Silently fail if page doesn't allow injection
+  }).catch((err) => {
+    console.log('[AppliedIn] injection failed:', err);
   });
 });
 
@@ -133,7 +141,18 @@ function injectUniversalTracker(platformName) {
   if (window.__appliedinInjected) return;
   window.__appliedinInjected = true;
 
+  console.log('[AppliedIn] universal tracker loaded on', window.location.href, '(platform:', platformName + ')');
+
   let lastHandledUrl = null;
+
+  // Many SPA-style career portals (Workday in particular) mutate the URL's
+  // query string or hash on internal navigation without a real page
+  // reload — comparing the raw href would treat every such tweak as "a
+  // different page," repeatedly re-arming detection on what is actually
+  // the same screen. Comparing origin+pathname only is far more stable.
+  function normalizedUrl() {
+    return window.location.origin + window.location.pathname;
+  }
 
   // Only genuinely FINAL submit labels trigger a completion check.
   // Words like "Apply"/"Register"/"Confirm"/"Done"/"Proceed" are too
@@ -252,8 +271,8 @@ function injectUniversalTracker(platformName) {
   }
 
   function handleDetectedSuccess() {
-    if (lastHandledUrl === window.location.href) return;
-    lastHandledUrl = window.location.href;
+    if (lastHandledUrl === normalizedUrl()) return;
+    lastHandledUrl = normalizedUrl();
 
     const jobData = getPageDetails();
     if (jobData && jobData.confident) {
@@ -268,11 +287,11 @@ function injectUniversalTracker(platformName) {
   // popup here rather than auto-saving — this signal is weaker than an
   // exact phrase match, so we ask rather than guess silently.
   function handlePossibleSuccess(formRef) {
-    if (lastHandledUrl === window.location.href) return true;
+    if (lastHandledUrl === normalizedUrl()) return true;
     if (pageLooksLikeError()) return false;
     if (!hasGenericSuccessElement() && !formDisappeared(formRef)) return false;
 
-    lastHandledUrl = window.location.href;
+    lastHandledUrl = normalizedUrl();
     const jobData = getPageDetails();
     if (jobData) showConfirmPopup();
     return true;
@@ -376,6 +395,24 @@ function injectUniversalTracker(platformName) {
     'search', 'get started', 'next', 'back', 'save'
   ];
 
+  // The exact-match blacklist above only catches literal matches like
+  // "Welcome" on its own — it misses "Welcome, Mohith Kintali (Mohith...)"
+  // since that text is never an exact match against anything. This catches
+  // greeting banners and other page chrome by pattern instead.
+  function looksLikeGreetingOrChrome(text) {
+    if (!text) return true;
+    const lower = text.toLowerCase().trim();
+    if (GENERIC_HEADINGS.includes(lower)) return true;
+    if (/^welcome\b/.test(lower)) return true;
+    if (/^(hi|hello|hey)\b/.test(lower)) return true;
+    if (/^you have\b/.test(lower)) return true;
+    if (/^my (applications|progress|profile|account)\b/.test(lower)) return true;
+    // Job titles are essentially never this long — a paragraph or
+    // greeting banner accidentally grabbed by an h1/h2 selector usually is
+    if (text.length > 80) return true;
+    return false;
+  }
+
   // Hosts that are form/survey PLATFORMS, not companies — guessing a
   // company name from these hostnames would produce nonsense like
   // "Docs" or "Forms". These generic form builders never tell us who
@@ -462,30 +499,42 @@ function injectUniversalTracker(platformName) {
         null;
 
       const hostnameCompany = guessCompanyFromHostname();
-      const company = metaCompany || hostnameCompany || 'Unknown Company';
+      const company = metaCompany || hostnameCompany || null;
 
-      const titleCandidates = [
-        structured?.title,
-        document.querySelector('meta[property="og:title"]')?.content?.trim(),
+      // Strong sources: structured JobPosting data and og:title metadata
+      // are specifically authored to describe THIS job — reliable enough
+      // to auto-save from.
+      const strongTitle =
+        structured?.title ||
+        document.querySelector('meta[property="og:title"]')?.content?.trim() ||
+        null;
+
+      // Weak sources: generic page headings. These have repeatedly turned
+      // out to grab the wrong thing (greeting banners, dashboard titles,
+      // "Apply" buttons) — still worth trying, but never confident, and
+      // filtered through the greeting/chrome detector first.
+      const weakTitleCandidates = [
         document.querySelector('h1')?.innerText?.trim(),
         document.querySelector('h2')?.innerText?.trim(),
         document.title?.trim()
       ];
-      const role = titleCandidates.find(t =>
-        t && t.length > 3 && !GENERIC_HEADINGS.includes(t.toLowerCase())
-      ) || 'Unknown Role';
+      const weakTitle = weakTitleCandidates.find(t =>
+        t && t.length > 3 && !looksLikeGreetingOrChrome(t)
+      ) || null;
 
-      // "Confident" means we're comfortable auto-saving without asking —
-      // structured JobPosting data (when present) is trustworthy on its
-      // own; otherwise require both a real company (not just a hostname
-      // guess) and a real role, not just fallback text.
+      const role = strongTitle || weakTitle || null;
+
+      // "Confident" means we're comfortable auto-saving without asking.
+      // Structured JobPosting data is trustworthy on its own; otherwise
+      // require a real (non-guessed) company AND a strong title source —
+      // a weak/guessed title is never enough to auto-save on its own.
       const confident =
         (!!structured?.company && !!structured?.title) ||
-        (!!metaCompany && company !== 'Unknown Company' && role !== 'Unknown Role');
+        (!!metaCompany && !!strongTitle);
 
       return {
-        company,
-        role: role.substring(0, 100),
+        company: company || null,
+        role: role ? role.substring(0, 100) : null,
         location: structured?.location || 'Unknown Location',
         platform: platformName,
         url: window.location.href,
@@ -534,7 +583,7 @@ function injectUniversalTracker(platformName) {
   // Method 2 below is the real authority: it only acts once genuine
   // success text actually appears anywhere on the page.
   document.addEventListener('click', function (e) {
-    if (lastHandledUrl === window.location.href) return;
+    if (lastHandledUrl === normalizedUrl()) return;
 
     const element = e.target.closest('button, input[type="submit"], input[type="button"], a');
     if (!element) return;
@@ -555,7 +604,7 @@ function injectUniversalTracker(platformName) {
     const formRef = element.closest('form');
 
     setTimeout(() => {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
       if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
         handleDetectedSuccess();
         return;
@@ -593,21 +642,22 @@ function injectUniversalTracker(platformName) {
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
 
       const currentlyHasSuccessText = bodyLooksLikeSuccess();
+      const isNewTransition = currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad;
 
-      // Only react to a transition from absent -> present, never to text
-      // that was already sitting on the page when we started observing.
-      if (currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad) {
+      // Always sync the baseline FIRST, before any early return — this was
+      // the actual bug causing the infinite popup loop: the old code only
+      // updated the baseline on the non-triggering path, so after a real
+      // trigger it stayed permanently stuck at "false," making every
+      // subsequent unrelated mutation look like a fresh transition again.
+      bodyAlreadyHadSuccessTextOnLoad = currentlyHasSuccessText;
+
+      if (isNewTransition) {
         setTimeout(handleDetectedSuccess, 1000);
         return;
       }
-
-      // Keep the baseline in sync — if the text disappears (e.g. a
-      // dashboard entry gets removed) a later genuine reappearance should
-      // still be able to trigger.
-      bodyAlreadyHadSuccessTextOnLoad = currentlyHasSuccessText;
 
       if (urlLooksLikeSuccess()) {
         setTimeout(handleDetectedSuccess, 1000);
@@ -667,19 +717,19 @@ function injectUniversalTracker(platformName) {
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
         <input id="appliedin-company"
           value="${jobData?.company || ''}"
-          placeholder="Company name"
+          placeholder="${jobData?.company ? 'Company name' : "Couldn't detect — please type the company name"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           margin-bottom:14px;color:#111827;outline:none;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${jobData?.role?.substring(0, 60) || ''}"
-          placeholder="Job role"
+          placeholder="${jobData?.role ? 'Job role' : "Couldn't detect — please type the job role"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           color:#111827;outline:none;" />
         <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
-          ✏️ If the details above look wrong, feel free to edit them before saving.
+          ✏️ If a detail above looks wrong, feel free to correct it before saving.
         </div>
       </div>
       <div style="display:flex;gap:10px;">

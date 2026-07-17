@@ -18,7 +18,7 @@
         structured?.title ||
         document.querySelector('.jd-header-title')?.innerText?.trim() ||
         document.querySelector('[class*="job-title"]')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
         'Unknown Role';
 
       const company =
@@ -114,7 +114,7 @@
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Naukri', function () {

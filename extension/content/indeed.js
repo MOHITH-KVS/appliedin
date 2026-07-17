@@ -40,7 +40,7 @@
         structured?.title ||
         document.querySelector('.jobsearch-JobInfoHeader-title')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
         null;
 
       const company =
@@ -135,7 +135,7 @@
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetailsFromApplySummary();
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Indeed', function () {

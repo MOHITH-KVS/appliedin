@@ -33,7 +33,7 @@
         structured?.title ||
         document.querySelector('[data-test="job-title"]')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
         'Unknown Role';
 
       const company =
@@ -105,8 +105,12 @@
     lastHandledUrl = window.location.href;
 
     const jobData = getJobDetails();
-    if (jobData) {
+    if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
       saveApplication(jobData);
+    } else if (jobData) {
+      window.__appliedinCommon.showConfirmPopup(jobData, 'Glassdoor', function () {
+        // user answered — this URL stays marked as handled
+      });
     } else {
       // couldn't read anything — allow a later mutation to retry
       lastHandledUrl = null;
@@ -151,11 +155,11 @@
 
         lastHandledUrl = window.location.href;
 
-        if (jobData) {
+        if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
           saveApplication(jobData);
         } else {
           window.__appliedinCommon.showConfirmPopup(
-            { company: '', role: '', platform: 'Glassdoor', url: window.location.href, date: new Date().toISOString(), status: 'Applied' },
+            jobData || { company: '', role: '', platform: 'Glassdoor', url: window.location.href, date: new Date().toISOString(), status: 'Applied' },
             'Glassdoor',
             function () {
               // user answered — this URL stays marked as handled

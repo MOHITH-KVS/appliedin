@@ -140,9 +140,20 @@ document.addEventListener('DOMContentLoaded', function () {
       card.innerHTML = `
         <div class="app-card-top">
           <div class="app-company">${escapeHtml(app.company)}</div>
-          <button class="btn-delete" data-index="${realIndex}">🗑</button>
+          <div class="card-actions">
+            <button class="btn-edit" data-index="${realIndex}" title="Edit company/role">✏️</button>
+            <button class="btn-delete" data-index="${realIndex}">🗑</button>
+          </div>
         </div>
         <div class="app-role" title="${escapeHtml(app.role)}">${escapeHtml(app.role)}</div>
+        <div class="edit-form" data-index="${realIndex}" style="display:none;">
+          <input type="text" class="edit-company" value="${escapeHtml(app.company)}" placeholder="Company name" />
+          <input type="text" class="edit-role" value="${escapeHtml(app.role)}" placeholder="Job role" />
+          <div class="edit-form-actions">
+            <button class="btn-edit-save" data-index="${realIndex}">Save</button>
+            <button class="btn-edit-cancel" data-index="${realIndex}">Cancel</button>
+          </div>
+        </div>
         <div class="app-card-bottom">
           <div class="app-meta">
             <span class="app-platform">${escapeHtml(app.platform || 'Unknown')}</span>
@@ -163,12 +174,55 @@ document.addEventListener('DOMContentLoaded', function () {
       card.addEventListener('click', function (e) {
         if (
           e.target.classList.contains('btn-delete') ||
-          e.target.classList.contains('status-select')
+          e.target.classList.contains('btn-edit') ||
+          e.target.classList.contains('btn-edit-save') ||
+          e.target.classList.contains('btn-edit-cancel') ||
+          e.target.classList.contains('edit-company') ||
+          e.target.classList.contains('edit-role') ||
+          e.target.classList.contains('status-select') ||
+          card.querySelector('.edit-form').style.display === 'block'
         ) return;
         if (app.url) chrome.tabs.create({ url: app.url });
       });
 
       list.appendChild(card);
+    });
+
+    // Edit toggle
+    document.querySelectorAll('.btn-edit').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const idx = this.dataset.index;
+        const form = document.querySelector(`.edit-form[data-index="${idx}"]`);
+        if (form) form.style.display = form.style.display === 'block' ? 'none' : 'block';
+      });
+    });
+
+    document.querySelectorAll('.btn-edit-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const form = document.querySelector(`.edit-form[data-index="${this.dataset.index}"]`);
+        if (form) form.style.display = 'none';
+      });
+    });
+
+    document.querySelectorAll('.btn-edit-save').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const idx = parseInt(this.dataset.index);
+        const form = document.querySelector(`.edit-form[data-index="${idx}"]`);
+        const newCompany = form.querySelector('.edit-company').value.trim();
+        const newRole = form.querySelector('.edit-role').value.trim();
+
+        if (!newCompany || !newRole) {
+          alert('Company and role cannot be empty.');
+          return;
+        }
+
+        allApplications[idx].company = newCompany;
+        allApplications[idx].role = newRole;
+        chrome.storage.local.set({ applications: allApplications }, loadApplications);
+      });
     });
 
     // Status change

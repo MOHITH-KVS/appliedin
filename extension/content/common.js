@@ -108,8 +108,18 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       border: 1px solid #e5e7eb;
     `;
 
-    const safeCompany = (defaultData?.company || '').replace(/"/g, '&quot;');
-    const safeRole = (defaultData?.role || '').substring(0, 60).replace(/"/g, '&quot;');
+    const rawCompany = defaultData?.company;
+    const rawRole = defaultData?.role;
+
+    // Treat sentinel 'Unknown Company'/'Unknown Role' as if nothing was
+    // detected at all — showing that literal text as a pre-filled value
+    // looks like a real (if odd) answer, and a hurried person could easily
+    // miss that it's actually a placeholder rather than real data.
+    const hasCompany = rawCompany && rawCompany !== 'Unknown Company';
+    const hasRole = rawRole && rawRole !== 'Unknown Role';
+
+    const safeCompany = (hasCompany ? rawCompany : '').replace(/"/g, '&quot;');
+    const safeRole = (hasRole ? rawRole : '').substring(0, 60).replace(/"/g, '&quot;');
 
     popup.innerHTML = `
       <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:6px;">
@@ -122,19 +132,19 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
         <input id="appliedin-company"
           value="${safeCompany}"
-          placeholder="Company name"
+          placeholder="${hasCompany ? 'Company name' : "Couldn't detect — please type the company name"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           margin-bottom:14px;color:#111827;outline:none;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${safeRole}"
-          placeholder="Job role"
+          placeholder="${hasRole ? 'Job role' : "Couldn't detect — please type the job role"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           color:#111827;outline:none;" />
         <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
-          ✏️ If the details above look wrong, feel free to edit them before saving.
+          ✏️ If a detail above looks wrong, feel free to correct it before saving.
         </div>
       </div>
       <div style="display:flex;gap:10px;">
@@ -234,5 +244,56 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     return null;
   }
 
-  return { saveApplication, showNotification, showConfirmPopup, getStructuredJobData };
+  // Some sites briefly show transient status text like "Applying for X..."
+  // or "Submitting..." right when a selector fires mid-animation, and that
+  // gets mistakenly captured as if it were the actual role name. This
+  // strips known transient prefixes and flags text that still looks
+  // unusable afterward, so callers can fall back to asking instead of
+  // confidently saving garbage.
+  function cleanAndValidateRole(text) {
+    if (!text) return null;
+
+    let cleaned = text.trim();
+
+    const transientPrefixes = [
+      /^applying for\s*/i,
+      /^apply for\s*/i,
+      /^submitting\s*/i,
+      /^please wait\.*/i,
+      /^loading\.*/i,
+      /^processing\.*/i
+    ];
+    for (const pattern of transientPrefixes) {
+      cleaned = cleaned.replace(pattern, '').trim();
+    }
+
+    // Still looks like leftover status text, or too short to be a real
+    // role name, or ends mid-sentence with "..."
+    if (
+      !cleaned ||
+      cleaned.length < 3 ||
+      /\.\.\.$/.test(cleaned) ||
+      /^(applying|submitting|loading|processing|please wait)$/i.test(cleaned)
+    ) {
+      return null;
+    }
+
+    // Greeting banners and dashboard chrome ("Welcome, [Name]...", "Hi
+    // there", "My Applications") also get accidentally grabbed by generic
+    // h1/h2 selectors — reject those patterns too.
+    const lower = cleaned.toLowerCase();
+    if (
+      /^welcome\b/.test(lower) ||
+      /^(hi|hello|hey)\b/.test(lower) ||
+      /^you have\b/.test(lower) ||
+      /^my (applications|progress|profile|account)\b/.test(lower) ||
+      cleaned.length > 80
+    ) {
+      return null;
+    }
+
+    return cleaned;
+  }
+
+  return { saveApplication, showNotification, showConfirmPopup, getStructuredJobData, cleanAndValidateRole };
 })();

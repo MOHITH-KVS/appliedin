@@ -46,7 +46,9 @@
         document.querySelector('h3')?.innerText?.trim(),
         document.querySelector('h1')?.innerText?.trim()
       ];
-      const title = titleCandidates.find(t => t && !isGenericText(t)) || 'Unknown Role';
+      const title = titleCandidates.find(t =>
+        t && !isGenericText(t) && window.__appliedinCommon?.cleanAndValidateRole?.(t)
+      ) || 'Unknown Role';
 
       const companyCandidates = [
         structured?.company,
@@ -138,7 +140,7 @@
       const jobData = pendingJob || getJobDetails();
       console.log('[AppliedIn] jobData for save:', jobData);
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {

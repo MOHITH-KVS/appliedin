@@ -11,13 +11,17 @@
   function getJobDetails() {
     try {
       const structured = window.__appliedinCommon?.getStructuredJobData?.();
+      const clean = window.__appliedinCommon?.cleanAndValidateRole;
 
-      const title =
-        structured?.title ||
-        document.querySelector('.profile')?.innerText?.trim() ||
-        document.querySelector('[class*="profile-title"]')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
-        'Unknown Role';
+      const titleCandidates = [
+        structured?.title,
+        document.querySelector('.profile')?.innerText?.trim(),
+        document.querySelector('[class*="profile-title"]')?.innerText?.trim(),
+        document.querySelector('h1')?.innerText?.trim()
+      ];
+      const title = titleCandidates
+        .map(t => clean ? clean(t) : t)
+        .find(t => t) || 'Unknown Role';
 
       const company =
         structured?.company ||
@@ -86,7 +90,7 @@
 
     const jobData = getJobDetails();
 
-    if (jobData && jobData.company !== 'Unknown Company') {
+    if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
       saveApplication(jobData);
     } else if (jobData) {
       window.__appliedinCommon.showConfirmPopup(jobData, 'Internshala', function () {
