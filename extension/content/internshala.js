@@ -8,6 +8,13 @@
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
 
+  // SPA-style portals often mutate query strings/hash on internal
+  // navigation without a real reload - comparing origin+pathname only
+  // avoids false re-triggers from those irrelevant URL changes.
+  function normalizedUrl() {
+    return window.location.origin + window.location.pathname;
+  }
+
   function getJobDetails() {
     try {
       const structured = window.__appliedinCommon?.getStructuredJobData?.();
@@ -85,8 +92,8 @@
   }
 
   function handleSuccess() {
-    if (lastHandledUrl === window.location.href) return;
-    lastHandledUrl = window.location.href;
+    if (lastHandledUrl === normalizedUrl()) return;
+    lastHandledUrl = normalizedUrl();
 
     const jobData = getJobDetails();
 
@@ -114,7 +121,7 @@
       text === 'send application' ||
       text === 'confirm'
     ) {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
 
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
@@ -129,7 +136,7 @@
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
       if (bodyLooksLikeSuccess()) {
         setTimeout(handleSuccess, 1000);
       }

@@ -364,6 +364,14 @@ body {
   border-top: 1px solid #f3f4f6;
 }
 
+.tip-text {
+  padding: 0 16px 12px;
+  font-size: 10px;
+  color: #9ca3af;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .btn-add {
   flex: 1;
   padding: 8px;

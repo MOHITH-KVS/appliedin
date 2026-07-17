@@ -69,6 +69,167 @@ function detectPlatform(url) {
   }
 }
 
+// ── Universal manual capture ──
+// This is the real backup plan for pages the automatic detection never
+// even watches (URL has no job-related keyword), or where the page is
+// structurally unreadable (canvas UI, image-based confirmation, opaque
+// iframe). It works on literally ANY page, completely independent of the
+// job-keyword gate below — triggered by right-click or a keyboard shortcut,
+// never by automatic detection.
+
+chrome.runtime.onInstalled.addListener(function () {
+  chrome.contextMenus.create({
+    id: 'appliedin-manual-log',
+    title: '📋 Log this application with AppliedIn',
+    contexts: ['page', 'selection', 'link']
+  });
+});
+
+chrome.contextMenus.onClicked.addListener(function (info, tab) {
+  if (info.menuItemId === 'appliedin-manual-log' && tab?.id) {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: injectManualCapture
+    }).catch((err) => {
+      console.log('[AppliedIn] manual capture injection failed:', err);
+    });
+  }
+});
+
+chrome.commands.onCommand.addListener(function (command) {
+  if (command !== 'log-application') return;
+  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+    const tab = tabs[0];
+    if (!tab?.id) return;
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: injectManualCapture
+    }).catch((err) => {
+      console.log('[AppliedIn] manual capture injection failed:', err);
+    });
+  });
+});
+
+// Self-contained (MV3 injected functions can't reference outside scope) —
+// does a lightweight best-effort read of the current page, then always
+// shows an editable popup so the person can confirm or correct before
+// saving. Deliberately simpler than the full detection pipeline, since
+// this is a manual trigger — the person already knows they want to log
+// something, we're just saving them from typing everything from scratch.
+function injectManualCapture() {
+  if (document.getElementById('appliedin-confirm')) return; // already open
+
+  function guessCompany() {
+    const meta =
+      document.querySelector('meta[property="og:site_name"]')?.content?.trim() ||
+      document.querySelector('meta[name="author"]')?.content?.trim();
+    if (meta) return meta;
+
+    try {
+      const parts = new URL(window.location.href).hostname.split('.').filter(Boolean);
+      const generic = ['www', 'account', 'accounts', 'apply', 'jobs', 'careers', 'career', 'portal', 'my', 'app'];
+      while (parts.length > 1 && generic.includes(parts[0].toLowerCase())) parts.shift();
+      const candidate = parts[0];
+      if (candidate && !generic.includes(candidate.toLowerCase())) {
+        return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+
+  function guessRole() {
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.content?.trim();
+    if (ogTitle && ogTitle.length <= 100) return ogTitle;
+    return '';
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'appliedin-overlay';
+  overlay.style.cssText = `
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: rgba(0,0,0,0.45); z-index: 999998;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  `;
+
+  const popup = document.createElement('div');
+  popup.id = 'appliedin-confirm';
+  popup.style.cssText = `
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 420px; max-width: 90vw; background: white; border-radius: 16px;
+    padding: 28px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); z-index: 999999;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    border: 1px solid #e5e7eb;
+  `;
+
+  const guessedCompany = guessCompany();
+  const guessedRole = guessRole();
+
+  popup.innerHTML = `
+    <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:6px;">
+      📋 Log this application
+    </div>
+    <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.4;">
+      Add the company and role — we'll save it to your AppliedIn list.
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
+      <input id="appliedin-company" value="${guessedCompany.replace(/"/g, '&quot;')}"
+        placeholder="${guessedCompany ? 'Company name' : "Type the company name"}"
+        style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e5e7eb;
+        border-radius:8px;font-size:14px;margin-bottom:14px;color:#111827;outline:none;" />
+      <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
+      <input id="appliedin-role" value="${guessedRole.replace(/"/g, '&quot;')}"
+        placeholder="${guessedRole ? 'Job role' : "Type the job role"}"
+        style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e5e7eb;
+        border-radius:8px;font-size:14px;color:#111827;outline:none;" />
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button id="appliedin-yes" style="flex:1;padding:12px;background:#22c55e;color:white;
+        border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">✅ Save</button>
+      <button id="appliedin-no" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;
+        border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">❌ Cancel</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(popup);
+  document.getElementById('appliedin-company').focus();
+
+  document.getElementById('appliedin-yes').addEventListener('click', function () {
+    const company = document.getElementById('appliedin-company').value.trim();
+    const role = document.getElementById('appliedin-role').value.trim();
+
+    if (!company || !role) {
+      alert('Please enter both company and role.');
+      return;
+    }
+
+    const jobData = {
+      company,
+      role,
+      location: 'Unknown Location',
+      platform: 'Manual',
+      url: window.location.href,
+      date: new Date().toISOString(),
+      status: 'Applied'
+    };
+
+    chrome.storage.local.get(['applications'], function (result) {
+      const applications = result.applications || [];
+      applications.unshift(jobData);
+      chrome.storage.local.set({ applications }, function () {
+        overlay.remove();
+        popup.remove();
+      });
+    });
+  });
+
+  document.getElementById('appliedin-no').addEventListener('click', function () {
+    overlay.remove();
+    popup.remove();
+  });
+}
+
 // Watch all tabs for URL changes
 chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   if (changeInfo.status !== 'complete') return;
@@ -100,12 +261,20 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 
   // Check if this looks like a job related page
   const jobKeywords = [
+    // Generic job/career wording
     'career', 'careers', 'jobs', 'job', 'apply',
     'application', 'hiring', 'vacancy', 'vacancies',
-    'opening', 'openings', 'recruitment', 'work-with-us',
-    'join-us', 'join-our-team', 'opportunities', 'workday',
-    'greenhouse', 'lever', 'taleo', 'icims', 'smartrecruiters',
-    'thankyou', 'thank-you', 'thank_you', 'confirmation'
+    'opening', 'openings', 'recruitment', 'recruit', 'recruiting',
+    'work-with-us', 'join-us', 'join-our-team', 'joinus',
+    'opportunities', 'employment', 'positions', 'roles',
+    'talent', 'staffing', 'hire', 'hire-us',
+    'thankyou', 'thank-you', 'thank_you', 'confirmation',
+    // Global ATS platforms
+    'workday', 'greenhouse', 'lever', 'taleo', 'icims',
+    'smartrecruiters', 'workable', 'jobvite', 'ashbyhq',
+    'breezy', 'recruitee', 'personio', 'bamboohr',
+    // ATS/HR platforms common in India
+    'zohorecruit', 'freshteam', 'keka', 'darwinbox', 'peoplestrong'
   ];
 
   // Google Forms is a common way companies (especially for off-campus

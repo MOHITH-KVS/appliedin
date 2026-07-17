@@ -12,6 +12,13 @@
   // subsequent DOM mutation on a static "success" page (the success text
   // never disappears, so a boolean flag alone would loop forever).
   let lastHandledUrl = null;
+
+  // SPA-style portals often mutate query strings/hash on internal
+  // navigation without a real reload - comparing origin+pathname only
+  // avoids false re-triggers from those irrelevant URL changes.
+  function normalizedUrl() {
+    return window.location.origin + window.location.pathname;
+  }
   const PENDING_KEY = 'appliedin_pending_application';
 
   const successPhrases = [
@@ -101,8 +108,8 @@
   }
 
   function handleFinalSuccess() {
-    if (lastHandledUrl === window.location.href) return;
-    lastHandledUrl = window.location.href;
+    if (lastHandledUrl === normalizedUrl()) return;
+    lastHandledUrl = normalizedUrl();
 
     const jobData = getJobDetails();
     if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
@@ -145,7 +152,7 @@
       text.includes('send application');
 
     if (isFinalSubmit) {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
 
       setTimeout(() => {
         const jobData = getJobDetails();
@@ -153,7 +160,7 @@
 
         if (!successDetected) return; // not actually done yet — stay silent
 
-        lastHandledUrl = window.location.href;
+        lastHandledUrl = normalizedUrl();
 
         if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
           saveApplication(jobData);
@@ -175,7 +182,7 @@
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
       if (bodyLooksLikeFinalSuccess()) {
         setTimeout(handleFinalSuccess, 1000);
       }

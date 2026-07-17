@@ -7,6 +7,13 @@
   console.log('[AppliedIn] naukri.js loaded on', window.location.href);
 
   let lastHandledUrl = null;
+
+  // SPA-style portals often mutate query strings/hash on internal
+  // navigation without a real reload - comparing origin+pathname only
+  // avoids false re-triggers from those irrelevant URL changes.
+  function normalizedUrl() {
+    return window.location.origin + window.location.pathname;
+  }
   const PENDING_KEY = 'appliedin_pending_application';
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -108,8 +115,8 @@
   }
 
   function handleSuccess() {
-    if (lastHandledUrl === window.location.href) return;
-    lastHandledUrl = window.location.href;
+    if (lastHandledUrl === normalizedUrl()) return;
+    lastHandledUrl = normalizedUrl();
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
@@ -145,7 +152,7 @@
       const jobData = getJobDetailsForCaching();
       if (jobData) cachePendingJob(jobData);
 
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
 
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
@@ -161,7 +168,7 @@
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === window.location.href) return;
+      if (lastHandledUrl === normalizedUrl()) return;
       if (bodyLooksLikeSuccess()) {
         setTimeout(handleSuccess, 1000);
       }
