@@ -4,6 +4,17 @@
 (function () {
   console.log('[AppliedIn] internshala.js loaded on', window.location.href);
 
+  // Chat/messaging pages legitimately contain phrases like "your
+  // application has been received" as normal conversation text — that
+  // is NOT a submission confirmation, and this script should never run
+  // there at all. This was firing false popups on Internshala's chat
+  // inbox, using a completely unrelated job's info from the sidebar.
+  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
+  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
+    console.log('[AppliedIn] internshala.js: excluded page type, not running');
+    return;
+  }
+
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
@@ -15,6 +26,39 @@
     return window.location.origin + window.location.pathname;
   }
 
+  // Some sites (Internshala included) overlay a "Recommended jobs for
+  // you" modal on TOP of the actual application form — a naive selector
+  // can grab an unrelated job's company from that overlay instead of the
+  // real one being applied to. Skip anything inside a modal/overlay/
+  // recommendation container.
+  function isInsideExcludedContainer(el) {
+    if (!el) return false;
+    return !!el.closest(
+      '[class*="modal" i], [class*="overlay" i], [class*="recommend" i], ' +
+      '[class*="popup" i], [id*="modal" i], [class*="suggestion" i]'
+    );
+  }
+
+  function textFromSelector(selector) {
+    const el = document.querySelector(selector);
+    if (!el || isInsideExcludedContainer(el)) return null;
+    return el.innerText?.trim() || null;
+  }
+
+  // Final sanity check on ANY extracted text before it's trusted, from
+  // any source. A '|' character or unusual length is a strong sign that
+  // a selector accidentally grabbed multiple concatenated UI elements
+  // (e.g. "CompanyRole internship|Chatting") rather than one clean value.
+  function looksLikeGarbledConcatenation(text) {
+    if (!text) return false;
+    if (text.includes('|')) return true;
+    if (text.length > 80) return true;
+    // Two capital-letter "words" running together with no space
+    // ("WordscloudAI") is another common symptom of concatenation.
+    if (/[a-z][A-Z]{2,}/.test(text)) return true;
+    return false;
+  }
+
   function getJobDetails() {
     try {
       const structured = window.__appliedinCommon?.getStructuredJobData?.();
@@ -22,25 +66,26 @@
 
       const titleCandidates = [
         structured?.title,
-        document.querySelector('.profile')?.innerText?.trim(),
-        document.querySelector('[class*="profile-title"]')?.innerText?.trim(),
-        document.querySelector('h1')?.innerText?.trim()
+        textFromSelector('.profile'),
+        textFromSelector('[class*="profile-title"]'),
+        textFromSelector('h1')
       ];
       const title = titleCandidates
         .map(t => clean ? clean(t) : t)
-        .find(t => t) || 'Unknown Role';
+        .find(t => t && !looksLikeGarbledConcatenation(t)) || 'Unknown Role';
 
-      const company =
-        structured?.company ||
-        document.querySelector('.company-name a')?.innerText?.trim() ||
-        document.querySelector('.company-name')?.innerText?.trim() ||
-        document.querySelector('[class*="company"]')?.innerText?.trim() ||
-        'Unknown Company';
+      const companyCandidates = [
+        structured?.company,
+        textFromSelector('.company-name a'),
+        textFromSelector('.company-name'),
+        textFromSelector('[class*="company"]')
+      ];
+      const company = companyCandidates.find(c => c && !looksLikeGarbledConcatenation(c)) || 'Unknown Company';
 
       const location =
         structured?.location ||
-        document.querySelector('.location_link')?.innerText?.trim() ||
-        document.querySelector('[class*="location"]')?.innerText?.trim() ||
+        textFromSelector('.location_link') ||
+        textFromSelector('[class*="location"]') ||
         'Work From Home';
 
       return {

@@ -27,6 +27,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       if (isDuplicate) {
         console.log('[AppliedIn] duplicate detected, not saving');
         showNotification('⚠️ Already applied here recently!', 'warning');
+        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
         if (onDuplicate) onDuplicate();
         return;
       }
@@ -35,6 +36,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       chrome.storage.local.set({ applications }, function () {
         console.log('[AppliedIn] saved successfully. Total applications:', applications.length);
         showNotification('✅ Application saved — ' + jobData.company, 'success');
+        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
         if (onSaved) onSaved();
       });
     });
@@ -128,23 +130,43 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.4;">
         Did you complete this application on <strong>${platformName}</strong>?
       </div>
+      <style>
+        #appliedin-confirm input:focus {
+          border-color: #6366f1 !important;
+          box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+        }
+        #appliedin-confirm input.appliedin-needs-input {
+          border-color: #f59e0b !important;
+          background: #fffbeb !important;
+        }
+        #appliedin-confirm input::placeholder {
+          color: #b45309;
+          font-style: italic;
+        }
+        #appliedin-confirm input:not(.appliedin-needs-input)::placeholder {
+          color: #9ca3af;
+          font-style: normal;
+        }
+      </style>
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
         <input id="appliedin-company"
           value="${safeCompany}"
-          placeholder="${hasCompany ? 'Company name' : "Couldn't detect — please type the company name"}"
+          class="${hasCompany ? '' : 'appliedin-needs-input'}"
+          placeholder="${hasCompany ? 'Company name' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           margin-bottom:14px;color:#111827;outline:none;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${safeRole}"
-          placeholder="${hasRole ? 'Job role' : "Couldn't detect — please type the job role"}"
+          class="${hasRole ? '' : 'appliedin-needs-input'}"
+          placeholder="${hasRole ? 'Job role' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           color:#111827;outline:none;" />
         <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
-          ✏️ If a detail above looks wrong, feel free to correct it before saving.
+          ✏️ Both fields above are editable — click into either one to type or correct it.
         </div>
       </div>
       <div style="display:flex;gap:10px;">
@@ -165,6 +187,12 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
 
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
+
+    // Auto-focus whichever field needs input first, so it's immediately
+    // obvious (cursor blinking right there) that it's a real, editable
+    // field waiting for input — not stuck placeholder text.
+    const firstNeedsInput = document.querySelector('#appliedin-confirm .appliedin-needs-input');
+    (firstNeedsInput || document.getElementById('appliedin-company'))?.focus();
 
     document.getElementById('appliedin-yes').addEventListener('click', function () {
       const finalCompany = document.getElementById('appliedin-company').value.trim();

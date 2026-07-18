@@ -218,6 +218,7 @@ function injectManualCapture() {
       const applications = result.applications || [];
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
+        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
         overlay.remove();
         popup.remove();
       });
@@ -229,6 +230,39 @@ function injectManualCapture() {
     popup.remove();
   });
 }
+
+// ── Persistent badge state ──
+// A 3-second toast is easy to miss entirely if you're not looking at that
+// exact moment. This badge on the extension icon is persistent instead —
+// it stays until the page changes, so checking it any time after applying
+// gives a definitive answer, not just a moment you might have missed.
+//
+//   (no badge)  — not watching this page at all
+//   "●" (blue)  — watching, nothing saved yet
+//   "✓" (green) — saved for this page
+function setBadgeState(tabId, state) {
+  if (state === 'watching') {
+    chrome.action.setBadgeText({ tabId, text: '●' });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: '#6366f1' });
+    chrome.action.setTitle({ tabId, title: 'AppliedIn — watching this page for a submission' });
+  } else if (state === 'saved') {
+    chrome.action.setBadgeText({ tabId, text: '✓' });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: '#22c55e' });
+    chrome.action.setTitle({ tabId, title: 'AppliedIn — saved for this page ✓' });
+  } else {
+    chrome.action.setBadgeText({ tabId, text: '' });
+    chrome.action.setTitle({ tabId, title: "AppliedIn — not watching this page. Right-click and choose \"Log this application\" if you applied here." });
+  }
+}
+
+// Content scripts / injected functions message here the moment they
+// successfully save, so the badge can flip to "saved" immediately —
+// far more reliable than hoping someone catches a 3-second toast.
+chrome.runtime.onMessage.addListener(function (message, sender) {
+  if (message?.type === 'appliedin_saved' && sender?.tab?.id) {
+    setBadgeState(sender.tab.id, 'saved');
+  }
+});
 
 // Watch all tabs for URL changes
 chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
@@ -243,7 +277,10 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     url.startsWith('chrome-extension://') ||
     url.startsWith('about:') ||
     url.startsWith('edge://')
-  ) return;
+  ) {
+    setBadgeState(tabId, 'idle');
+    return;
+  }
 
   // Skip already covered portals — they handle themselves
   const coveredPortals = [
@@ -257,7 +294,12 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   ];
 
   const isCovered = coveredPortals.some(portal => url.includes(portal));
-  if (isCovered) return;
+  if (isCovered) {
+    // Dedicated content scripts handle these — still show "watching" so
+    // the person gets the same at-a-glance confirmation everywhere.
+    setBadgeState(tabId, 'watching');
+    return;
+  }
 
   // Check if this looks like a job related page
   const jobKeywords = [
@@ -281,15 +323,27 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   // hiring in India) collect applications, but its URLs are auto-generated
   // IDs like docs.google.com/forms/d/e/1FAIpQLS.../viewform — they never
   // contain any job-related keyword, so they need an explicit check.
+  // Chat/messaging pages legitimately contain application-related phrases
+  // in normal conversation (a recruiter writing "we received your
+  // application") — never a real submission confirmation. Exclude these
+  // regardless of whether the URL also happens to contain a job keyword.
+  const excludedPathPatterns = ['/chat/', '/message', '/inbox', '/conversation'];
+  const isExcludedPage = excludedPathPatterns.some(p => url.includes(p));
+
   const isGoogleForm = url.includes('docs.google.com/forms/');
 
-  const isJobPage = isGoogleForm || jobKeywords.some(keyword => url.includes(keyword));
+  const isJobPage = !isExcludedPage && (isGoogleForm || jobKeywords.some(keyword => url.includes(keyword)));
 
-  if (isGoogleForm) {
+  if (isGoogleForm && !isExcludedPage) {
     console.log('[AppliedIn] Google Form detected, injecting tracker:', url);
   }
 
-  if (!isJobPage) return;
+  if (!isJobPage) {
+    setBadgeState(tabId, 'idle');
+    return;
+  }
+
+  setBadgeState(tabId, 'watching');
 
   // Inject universal tracker into this page
   // allFrames: true so an embedded Google Form (or other iframe-based
@@ -733,12 +787,14 @@ function injectUniversalTracker(platformName) {
 
       if (isDuplicate) {
         showToast('⚠️ Already applied here recently!', '#f59e0b');
+        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
         return;
       }
 
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
         showToast('✅ Application saved — ' + jobData.company, '#22c55e');
+        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
       });
     });
   }
@@ -882,23 +938,43 @@ function injectUniversalTracker(platformName) {
       <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.4;">
         Did you complete this application?
       </div>
+      <style>
+        #appliedin-confirm input:focus {
+          border-color: #6366f1 !important;
+          box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+        }
+        #appliedin-confirm input.appliedin-needs-input {
+          border-color: #f59e0b !important;
+          background: #fffbeb !important;
+        }
+        #appliedin-confirm input::placeholder {
+          color: #b45309;
+          font-style: italic;
+        }
+        #appliedin-confirm input:not(.appliedin-needs-input)::placeholder {
+          color: #9ca3af;
+          font-style: normal;
+        }
+      </style>
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
         <input id="appliedin-company"
           value="${jobData?.company || ''}"
-          placeholder="${jobData?.company ? 'Company name' : "Couldn't detect — please type the company name"}"
+          class="${jobData?.company ? '' : 'appliedin-needs-input'}"
+          placeholder="${jobData?.company ? 'Company name' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           margin-bottom:14px;color:#111827;outline:none;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${jobData?.role?.substring(0, 60) || ''}"
-          placeholder="${jobData?.role ? 'Job role' : "Couldn't detect — please type the job role"}"
+          class="${jobData?.role ? '' : 'appliedin-needs-input'}"
+          placeholder="${jobData?.role ? 'Job role' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           color:#111827;outline:none;" />
         <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
-          ✏️ If a detail above looks wrong, feel free to correct it before saving.
+          ✏️ Both fields above are editable — click into either one to type or correct it.
         </div>
       </div>
       <div style="display:flex;gap:10px;">
@@ -919,6 +995,9 @@ function injectUniversalTracker(platformName) {
 
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
+
+    const firstNeedsInput = document.querySelector('#appliedin-confirm .appliedin-needs-input');
+    (firstNeedsInput || document.getElementById('appliedin-company'))?.focus();
 
     document.getElementById('appliedin-yes').addEventListener('click', function () {
       const finalCompany = document.getElementById('appliedin-company').value.trim();

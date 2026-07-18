@@ -8,6 +8,15 @@
 (function () {
   console.log('[AppliedIn] glassdoor.js loaded on', window.location.href);
 
+  // Chat/messaging pages legitimately contain application-related phrases
+  // in normal conversation — never a real submission confirmation. This
+  // script should not run there at all.
+  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
+  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
+    console.log('[AppliedIn] glassdoor.js: excluded page type, not running');
+    return;
+  }
+
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation on a static "success" page (the success text
   // never disappears, so a boolean flag alone would loop forever).

@@ -8,6 +8,15 @@
 (function () {
   console.log('[AppliedIn] linkedin.js loaded on', window.location.href);
 
+  // Chat/messaging pages legitimately contain application-related phrases
+  // in normal conversation — never a real submission confirmation. This
+  // script should not run there at all.
+  const EXCLUDED_PATH_PATTERNS = ['/messaging/', '/chat/', '/inbox'];
+  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
+    console.log('[AppliedIn] linkedin.js: excluded page type, not running');
+    return;
+  }
+
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;

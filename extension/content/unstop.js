@@ -8,6 +8,15 @@
 (function () {
   console.log('[AppliedIn] unstop.js loaded on', window.location.href);
 
+  // Chat/messaging pages legitimately contain application-related phrases
+  // in normal conversation — never a real submission confirmation. This
+  // script should not run there at all.
+  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
+  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
+    console.log('[AppliedIn] unstop.js: excluded page type, not running');
+    return;
+  }
+
   let lastHandledUrl = null;
 
   // SPA-style portals often mutate query strings/hash on internal
