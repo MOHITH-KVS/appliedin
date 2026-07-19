@@ -22,8 +22,37 @@ document.addEventListener('DOMContentLoaded', function () {
     chrome.storage.local.get(['applications'], function (result) {
       allApplications = result.applications || [];
       updateStats();
+      renderWeeklySummary();
       renderApplications();
     });
+  }
+
+  // ── Weekly Summary ──
+  function renderWeeklySummary() {
+    const el = document.getElementById('weeklySummary');
+    if (!el) return;
+
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+
+    const thisWeek = allApplications.filter(a => new Date(a.date) >= weekStart);
+
+    if (thisWeek.length === 0) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const movedForward = thisWeek.filter(a => a.status !== 'Applied' && a.status !== 'Rejected').length;
+    const rejected = thisWeek.filter(a => a.status === 'Rejected').length;
+
+    let parts = [`📈 This week: <strong>${thisWeek.length}</strong> applied`];
+    if (movedForward > 0) parts.push(`<strong>${movedForward}</strong> moved forward`);
+    if (rejected > 0) parts.push(`<strong>${rejected}</strong> rejected`);
+
+    el.innerHTML = parts.join(' · ');
+    el.style.display = 'block';
   }
 
   // ── Update Stats ──

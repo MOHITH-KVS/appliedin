@@ -44,13 +44,174 @@ function sendGAEvent(eventName, params) {
 chrome.runtime.onInstalled.addListener(function (details) {
   if (details.reason === 'install') {
     sendGAEvent('extension_installed', { version: chrome.runtime.getManifest().version });
+    tryImportFromSync();
   } else if (details.reason === 'update') {
     sendGAEvent('extension_updated', {
       version: chrome.runtime.getManifest().version,
       previous_version: details.previousVersion
     });
   }
+
+  // Daily check for stale "Applied" entries worth following up on
+  chrome.alarms.create('appliedin_followup_check', { periodInMinutes: 60 * 24, delayInMinutes: 1 });
 });
+
+// Also run a check on every browser startup, not just once a day from
+// install time — covers the common case of a browser that's closed
+// overnight and only reopened the next day.
+chrome.runtime.onStartup.addListener(function () {
+  checkForStaleApplications();
+});
+
+chrome.alarms.onAlarm.addListener(function (alarm) {
+  if (alarm.name === 'appliedin_followup_check') {
+    checkForStaleApplications();
+  }
+});
+
+const FOLLOWUP_THRESHOLD_DAYS = 7;
+
+function checkForStaleApplications() {
+  chrome.storage.local.get(['applications'], function (result) {
+    const applications = result.applications || [];
+    const now = Date.now();
+    const thresholdMs = FOLLOWUP_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+
+    const stale = applications.filter(app => {
+      if (app.status !== 'Applied') return false; // already moved forward — no nag needed
+      const appliedAt = new Date(app.date).getTime();
+      if (!appliedAt) return false;
+
+      const daysSinceApplied = now - appliedAt;
+      if (daysSinceApplied < thresholdMs) return false;
+
+      // Remind once per week per entry, not every single day forever —
+      // avoids becoming naggy for older applications.
+      const lastReminded = app._lastReminded || 0;
+      return (now - lastReminded) >= thresholdMs;
+    });
+
+    if (stale.length === 0) return;
+
+    if (stale.length === 1) {
+      const app = stale[0];
+      const daysAgo = Math.floor((now - new Date(app.date).getTime()) / (24 * 60 * 60 * 1000));
+      chrome.notifications.create('appliedin_followup_' + Date.now(), {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: '📋 AppliedIn — Follow-up reminder',
+        message: `You applied to ${app.company} (${app.role}) ${daysAgo} days ago — still no response. Might be worth following up.`,
+        priority: 1
+      });
+    } else {
+      chrome.notifications.create('appliedin_followup_' + Date.now(), {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: '📋 AppliedIn — Follow-up reminder',
+        message: `You have ${stale.length} applications with no response in ${FOLLOWUP_THRESHOLD_DAYS}+ days. Worth checking in on them.`,
+        priority: 1
+      });
+    }
+
+    // Mark these as reminded so we don't nag again until next week
+    const staleUrls = new Set(stale.map(a => a.url));
+    const updated = applications.map(app =>
+      staleUrls.has(app.url) ? { ...app, _lastReminded: now } : app
+    );
+    chrome.storage.local.set({ applications: updated });
+
+    sendGAEvent('followup_reminder_shown', { count: stale.length });
+  });
+}
+
+// Open the popup-equivalent (extension's own page) when a reminder is clicked
+chrome.notifications.onClicked.addListener(function () {
+  chrome.action.openPopup?.();
+});
+
+// ── Chrome Sync mirroring ──
+// chrome.storage.sync is tiny (100KB total, 8KB per item, 512 items max) —
+// nowhere near enough for a full application history, so local storage
+// (unlimited) remains the source of truth. This mirrors only the most
+// recent entries, in a compact format, chunked across multiple keys to
+// stay under the per-item limit — enough for cross-device continuity on
+// an active job search without pretending sync can hold everything.
+const SYNC_MAX_ENTRIES = 100;
+const SYNC_CHUNK_SIZE = 20;
+
+function mirrorToSync(applications) {
+  const recent = applications.slice(0, SYNC_MAX_ENTRIES);
+  const compact = recent.map(a => ({
+    c: a.company, r: a.role, p: a.platform, d: a.date, s: a.status, u: a.url || '', l: a.location || ''
+  }));
+
+  const chunks = [];
+  for (let i = 0; i < compact.length; i += SYNC_CHUNK_SIZE) {
+    chunks.push(compact.slice(i, i + SYNC_CHUNK_SIZE));
+  }
+
+  chrome.storage.sync.get(null, function (existing) {
+    const staleKeys = Object.keys(existing || {}).filter(k => {
+      if (!k.startsWith('appliedin_sync_') || k === 'appliedin_sync_meta') return false;
+      const idx = parseInt(k.replace('appliedin_sync_', ''), 10);
+      return idx >= chunks.length;
+    });
+
+    const writeData = { appliedin_sync_meta: { chunkCount: chunks.length, updatedAt: Date.now() } };
+    chunks.forEach((chunk, idx) => {
+      writeData['appliedin_sync_' + idx] = chunk;
+    });
+
+    const finish = () => chrome.storage.sync.set(writeData).catch(() => {
+      // Sync can fail (offline, not signed in, quota) — local data is
+      // always safe regardless, so this is fine to just skip silently.
+    });
+
+    if (staleKeys.length) {
+      chrome.storage.sync.remove(staleKeys, finish);
+    } else {
+      finish();
+    }
+  });
+}
+
+// Whenever local storage's applications list changes — from ANY script,
+// content script or popup — mirror the update to sync. Centralizing this
+// here via onChanged means we don't need to touch every single save path
+// across all six site scripts individually.
+chrome.storage.onChanged.addListener(function (changes, areaName) {
+  if (areaName === 'local' && changes.applications) {
+    mirrorToSync(changes.applications.newValue || []);
+  }
+});
+
+// On a fresh install with empty local storage, check whether sync has
+// data from another device and import it — the actual "switched laptops
+// mid-search" continuity fix.
+function tryImportFromSync() {
+  chrome.storage.local.get(['applications'], function (localResult) {
+    if (localResult.applications && localResult.applications.length > 0) return; // never overwrite existing local data
+
+    chrome.storage.sync.get(null, function (syncResult) {
+      const meta = syncResult?.appliedin_sync_meta;
+      if (!meta || !meta.chunkCount) return;
+
+      let imported = [];
+      for (let i = 0; i < meta.chunkCount; i++) {
+        const chunk = syncResult['appliedin_sync_' + i] || [];
+        imported = imported.concat(chunk.map(c => ({
+          company: c.c, role: c.r, platform: c.p, date: c.d, status: c.s,
+          url: c.u || '', location: c.l || 'Unknown Location'
+        })));
+      }
+
+      if (imported.length > 0) {
+        chrome.storage.local.set({ applications: imported });
+        sendGAEvent('synced_from_other_device', { count: imported.length });
+      }
+    });
+  });
+}
 
 // Platform name detector from URL
 function detectPlatform(url) {

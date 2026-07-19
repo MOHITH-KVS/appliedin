@@ -114,6 +114,19 @@ body {
   background: #e5e7eb;
 }
 
+/* Weekly Summary */
+.weekly-summary {
+  margin: 10px 16px 0;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #eef2ff, #f5f3ff);
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #4338ca;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
 /* Search */
 .search-wrap {
   padding: 10px 16px;

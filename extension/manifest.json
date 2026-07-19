@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AppliedIn",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Built for Indian freshers.",
   "permissions": [
     "storage",
@@ -9,7 +9,9 @@
     "activeTab",
     "scripting",
     "tabs",
-    "contextMenus"
+    "contextMenus",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
