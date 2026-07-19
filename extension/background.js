@@ -1,6 +1,57 @@
 // AppliedIn - Background Service Worker
 // Handles ALL websites universally — captures on confirmation only
 
+// ── Google Analytics (GA4 Measurement Protocol) ──
+// Chrome extensions (Manifest V3) can't load Google's regular gtag.js
+// script due to CSP restrictions on remotely-hosted code, so we send
+// events as plain HTTPS requests instead — Google's own recommended
+// approach for extensions. Analytics failures are always swallowed
+// silently; they must never affect the extension's actual job-tracking.
+const GA_MEASUREMENT_ID = 'G-YRR8V9LW8D';
+const GA_API_SECRET = 'vJrg6JjDTmClwwAbtkZ1oA';
+
+function getOrCreateClientId(callback) {
+  chrome.storage.local.get(['appliedin_ga_client_id'], function (result) {
+    if (result.appliedin_ga_client_id) {
+      callback(result.appliedin_ga_client_id);
+      return;
+    }
+    const newId = (self.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)));
+    chrome.storage.local.set({ appliedin_ga_client_id: newId }, function () {
+      callback(newId);
+    });
+  });
+}
+
+function sendGAEvent(eventName, params) {
+  getOrCreateClientId(function (clientId) {
+    fetch(
+      `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          client_id: clientId,
+          events: [{ name: eventName, params: params || {} }]
+        })
+      }
+    ).catch(() => {
+      // Analytics is best-effort — never let a network hiccup here
+      // affect anything else the extension does.
+    });
+  });
+}
+
+chrome.runtime.onInstalled.addListener(function (details) {
+  if (details.reason === 'install') {
+    sendGAEvent('extension_installed', { version: chrome.runtime.getManifest().version });
+  } else if (details.reason === 'update') {
+    sendGAEvent('extension_updated', {
+      version: chrome.runtime.getManifest().version,
+      previous_version: details.previousVersion
+    });
+  }
+});
+
 // Platform name detector from URL
 function detectPlatform(url) {
   try {
@@ -218,7 +269,7 @@ function injectManualCapture() {
       const applications = result.applications || [];
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
-        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'appliedin_saved', platform: 'Manual', method: 'manual_entry' }).catch(() => {});
         overlay.remove();
         popup.remove();
       });
@@ -259,8 +310,16 @@ function setBadgeState(tabId, state) {
 // successfully save, so the badge can flip to "saved" immediately —
 // far more reliable than hoping someone catches a 3-second toast.
 chrome.runtime.onMessage.addListener(function (message, sender) {
-  if (message?.type === 'appliedin_saved' && sender?.tab?.id) {
-    setBadgeState(sender.tab.id, 'saved');
+  if (message?.type === 'appliedin_saved') {
+    if (sender?.tab?.id) {
+      setBadgeState(sender.tab.id, 'saved');
+    }
+    sendGAEvent('application_saved', {
+      platform: message.platform || 'Unknown',
+      method: message.method || 'auto'
+    });
+  } else if (message?.type === 'appliedin_popup_opened') {
+    sendGAEvent('popup_opened', {});
   }
 });
 
@@ -787,14 +846,22 @@ function injectUniversalTracker(platformName) {
 
       if (isDuplicate) {
         showToast('⚠️ Already applied here recently!', '#f59e0b');
-        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
+        chrome.runtime.sendMessage({
+          type: 'appliedin_saved',
+          platform: jobData.platform,
+          method: jobData.confident ? 'auto' : 'popup_confirm'
+        }).catch(() => {});
         return;
       }
 
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
         showToast('✅ Application saved — ' + jobData.company, '#22c55e');
-        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
+        chrome.runtime.sendMessage({
+          type: 'appliedin_saved',
+          platform: jobData.platform,
+          method: jobData.confident ? 'auto' : 'popup_confirm'
+        }).catch(() => {});
       });
     });
   }

@@ -6,8 +6,9 @@
 window.__appliedinCommon = window.__appliedinCommon || (function () {
   console.log('[AppliedIn] common.js loaded on', window.location.href);
 
-  function saveApplication(jobData, onDuplicate, onSaved) {
+  function saveApplication(jobData, onDuplicate, onSaved, method) {
     console.log('[AppliedIn] saveApplication called with:', jobData);
+    const saveMethod = method || 'auto';
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
@@ -27,7 +28,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       if (isDuplicate) {
         console.log('[AppliedIn] duplicate detected, not saving');
         showNotification('⚠️ Already applied here recently!', 'warning');
-        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'appliedin_saved', platform: jobData.platform, method: saveMethod }).catch(() => {});
         if (onDuplicate) onDuplicate();
         return;
       }
@@ -36,7 +37,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       chrome.storage.local.set({ applications }, function () {
         console.log('[AppliedIn] saved successfully. Total applications:', applications.length);
         showNotification('✅ Application saved — ' + jobData.company, 'success');
-        chrome.runtime.sendMessage({ type: 'appliedin_saved' }).catch(() => {});
+        chrome.runtime.sendMessage({ type: 'appliedin_saved', platform: jobData.platform, method: saveMethod }).catch(() => {});
         if (onSaved) onSaved();
       });
     });
@@ -213,7 +214,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
         date: new Date().toISOString()
       });
 
-      saveApplication(finalData);
+      saveApplication(finalData, undefined, undefined, 'popup_confirm');
       if (onDone) onDone();
     });
 

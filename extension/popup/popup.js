@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', function () {
     versionEl.textContent = 'v' + chrome.runtime.getManifest().version;
   }
 
+  chrome.runtime.sendMessage({ type: 'appliedin_popup_opened' }).catch(() => {});
+
   // ── Load Applications ──
   function loadApplications() {
     chrome.storage.local.get(['applications'], function (result) {
