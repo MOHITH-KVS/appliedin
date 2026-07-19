@@ -59,13 +59,41 @@
     return false;
   }
 
+  // Internshala's application URLs encode the exact role and company
+  // directly, e.g. ".../form/fresher-remote-junior-data-analyst-job-at-
+  // datavinci-private-limited1783937402" — far more reliable than
+  // guessing CSS class names, which can silently go stale.
+  function parseFromUrlSlug() {
+    try {
+      const path = decodeURIComponent(window.location.pathname);
+      const match = path.match(/\/form\/(.+?)-job-at-([a-z0-9-]+?)(\d+)?\/?$/i);
+      if (!match) return null;
+
+      const roleSlug = match[1];
+      const companySlug = match[2];
+
+      const toTitleCase = (slug) =>
+        slug.split('-').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+      const role = toTitleCase(roleSlug);
+      const company = toTitleCase(companySlug);
+
+      if (!role || !company) return null;
+      return { role, company };
+    } catch (e) {
+      return null;
+    }
+  }
+
   function getJobDetails() {
     try {
       const structured = window.__appliedinCommon?.getStructuredJobData?.();
       const clean = window.__appliedinCommon?.cleanAndValidateRole;
+      const urlParsed = parseFromUrlSlug();
 
       const titleCandidates = [
         structured?.title,
+        urlParsed?.role,
         textFromSelector('.profile'),
         textFromSelector('[class*="profile-title"]'),
         textFromSelector('h1')
@@ -76,6 +104,7 @@
 
       const companyCandidates = [
         structured?.company,
+        urlParsed?.company,
         textFromSelector('.company-name a'),
         textFromSelector('.company-name'),
         textFromSelector('[class*="company"]')

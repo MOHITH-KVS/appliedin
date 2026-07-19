@@ -176,12 +176,12 @@ function injectManualCapture() {
       <input id="appliedin-company" value="${guessedCompany.replace(/"/g, '&quot;')}"
         placeholder="${guessedCompany ? 'Company name' : "Type the company name"}"
         style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e5e7eb;
-        border-radius:8px;font-size:14px;margin-bottom:14px;color:#111827;outline:none;" />
+        border-radius:8px;font-size:14px;margin-bottom:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
       <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
       <input id="appliedin-role" value="${guessedRole.replace(/"/g, '&quot;')}"
         placeholder="${guessedRole ? 'Job role' : "Type the job role"}"
         style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e5e7eb;
-        border-radius:8px;font-size:14px;color:#111827;outline:none;" />
+        border-radius:8px;font-size:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
     </div>
     <div style="display:flex;gap:10px;">
       <button id="appliedin-yes" style="flex:1;padding:12px;background:#22c55e;color:white;
@@ -850,6 +850,43 @@ function injectUniversalTracker(platformName) {
     }, 2500);
   });
 
+  // METHOD 1B — Some sites (e.g. Shine.com) have a single "Apply" button
+  // that, on click, simply relabels itself to "Applied" — no new banner,
+  // no confirmation text anywhere else on the page. "Apply" alone is
+  // deliberately excluded from submitTexts above (too ambiguous — it's
+  // usually a START action, not completion), so this needs its own,
+  // narrowly-scoped check: only watches whether THIS SPECIFIC element's
+  // own label flips to a "done" state, not the whole page. That scoping
+  // is what makes it safe from the multi-section-form false-positive
+  // risk that ambiguous words like "Apply" would otherwise cause.
+  document.addEventListener('click', function (e) {
+    if (lastHandledUrl === normalizedUrl()) return;
+
+    const element = e.target.closest('button, a');
+    if (!element) return;
+
+    const text = (element.innerText || '').toLowerCase().trim();
+    if (!text.includes('apply')) return;
+    if (submitTexts.some(t => text === t || text.includes(t))) return; // already handled above
+
+    const originalText = element.innerText;
+
+    setTimeout(() => {
+      if (lastHandledUrl === normalizedUrl()) return;
+      if (!document.body.contains(element)) return;
+
+      const newText = (element.innerText || '').trim();
+      const flippedToApplied =
+        newText !== originalText &&
+        /\bapplied\b/i.test(newText) &&
+        !/\bapply\b/i.test(newText);
+
+      if (flippedToApplied) {
+        handleDetectedSuccess();
+      }
+    }, 2000);
+  });
+
   // Snapshot: was success text already present the moment this script
   // loaded? If so, it's very likely a persistent status label (e.g. an
   // "Applications" dashboard showing "Application submitted" for
@@ -964,7 +1001,7 @@ function injectUniversalTracker(platformName) {
           placeholder="${jobData?.company ? 'Company name' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          margin-bottom:14px;color:#111827;outline:none;" />
+          margin-bottom:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${jobData?.role?.substring(0, 60) || ''}"
@@ -972,7 +1009,7 @@ function injectUniversalTracker(platformName) {
           placeholder="${jobData?.role ? 'Job role' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          color:#111827;outline:none;" />
+          color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
         <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
           ✏️ Both fields above are editable — click into either one to type or correct it.
         </div>

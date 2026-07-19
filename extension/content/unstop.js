@@ -51,16 +51,27 @@
     return GENERIC_PHRASES.some(p => lower === p || lower.includes(p));
   }
 
+  // Unstop's tab title often follows "{Role} | {Something} - Unstop" —
+  // a reasonably stable fallback pattern independent of CSS class names.
+  function getRoleFromTabTitle() {
+    const parts = (document.title || '').split(/[|\-–]/).map(p => p.trim()).filter(Boolean);
+    return parts[0] || null;
+  }
+
   function getJobDetails() {
     try {
       const structured = window.__appliedinCommon?.getStructuredJobData?.();
+      const ogTitle = document.querySelector('meta[property="og:title"]')?.content?.trim();
+      const ogSiteName = document.querySelector('meta[property="og:site_name"]')?.content?.trim();
 
       const titleCandidates = [
         structured?.title,
+        ogTitle,
         document.querySelector('.opportunity-heading')?.innerText?.trim(),
         document.querySelector('[class*="opportunity-title"]')?.innerText?.trim(),
         document.querySelector('h3')?.innerText?.trim(),
-        document.querySelector('h1')?.innerText?.trim()
+        document.querySelector('h1')?.innerText?.trim(),
+        getRoleFromTabTitle()
       ];
       const title = titleCandidates.find(t =>
         t && !isGenericText(t) && window.__appliedinCommon?.cleanAndValidateRole?.(t)
@@ -68,6 +79,7 @@
 
       const companyCandidates = [
         structured?.company,
+        (ogSiteName && ogSiteName.toLowerCase() !== 'unstop') ? ogSiteName : null,
         document.querySelector('.company-name')?.innerText?.trim(),
         document.querySelector('[class*="org-name"]')?.innerText?.trim(),
         document.querySelector('[class*="company"]')?.innerText?.trim()

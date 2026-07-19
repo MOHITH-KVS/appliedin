@@ -156,7 +156,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
           placeholder="${hasCompany ? 'Company name' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          margin-bottom:14px;color:#111827;outline:none;" />
+          margin-bottom:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${safeRole}"
@@ -164,7 +164,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
           placeholder="${hasRole ? 'Job role' : "Couldn't detect — click here and type it"}"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          color:#111827;outline:none;" />
+          color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
         <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
           ✏️ Both fields above are editable — click into either one to type or correct it.
         </div>
