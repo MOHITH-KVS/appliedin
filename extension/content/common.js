@@ -12,9 +12,14 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
+      let matchedAgainst = null;
+
       const isDuplicate = applications.some(app => {
         // Same exact job URL — definitely a duplicate, regardless of when
-        if (jobData.url && app.url && app.url === jobData.url) return true;
+        if (jobData.url && app.url && app.url === jobData.url) {
+          matchedAgainst = { reason: 'same URL', app };
+          return true;
+        }
 
         // Generic/placeholder text should NEVER count as a match basis —
         // "Unknown Company" === "Unknown Company" would otherwise flag
@@ -35,10 +40,10 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
           // SAME submission within a tight window — same company within
           // 5 minutes is almost certainly one real application caught
           // twice, not two genuinely different ones.
-          return (
-            app.company.toLowerCase() === jobData.company.toLowerCase() &&
-            (new Date() - new Date(app.date)) < 5 * 60 * 1000
-          );
+          const matched = app.company.toLowerCase() === jobData.company.toLowerCase() &&
+            (new Date() - new Date(app.date)) < 5 * 60 * 1000;
+          if (matched) matchedAgainst = { reason: 'same company, unknown role, within 5min', app };
+          return matched;
         }
 
         // Same company + role within the last 24 hours — likely a
@@ -47,7 +52,10 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
           app.company.toLowerCase() === jobData.company.toLowerCase() &&
           app.role.toLowerCase() === jobData.role.toLowerCase() &&
           (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-        ) return true;
+        ) {
+          matchedAgainst = { reason: 'same company+role within 24h', app };
+          return true;
+        }
 
         // Same company within a tight few-minute window, even if the role
         // TEXT differs — catches two different detection paths (e.g. a
@@ -57,10 +65,22 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
         if (
           app.company.toLowerCase() === jobData.company.toLowerCase() &&
           (new Date() - new Date(app.date)) < 5 * 60 * 1000
-        ) return true;
+        ) {
+          matchedAgainst = { reason: 'same company within 5min (role differs)', app };
+          return true;
+        }
 
         return false;
       });
+
+      if (isDuplicate) {
+        console.log('[AppliedIn] DUPLICATE MATCH:', matchedAgainst?.reason,
+          '\n  New entry:', { company: jobData.company, role: jobData.role, url: jobData.url },
+          '\n  Matched against:', matchedAgainst?.app && {
+            company: matchedAgainst.app.company, role: matchedAgainst.app.role,
+            url: matchedAgainst.app.url, date: matchedAgainst.app.date
+          });
+      }
 
       if (isDuplicate) {
         console.log('[AppliedIn] duplicate detected, not saving');
