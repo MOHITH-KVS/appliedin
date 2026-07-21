@@ -16,6 +16,16 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
         // Same exact job URL — definitely a duplicate, regardless of when
         if (jobData.url && app.url && app.url === jobData.url) return true;
 
+        // Generic/placeholder text should NEVER count as a match basis —
+        // "Unknown Company" === "Unknown Company" would otherwise flag
+        // every undetected application as a duplicate of any other
+        // undetected one, even completely different jobs. Without a real
+        // company name, only the exact-URL check above can catch a
+        // genuine duplicate.
+        if (app.company === 'Unknown Company' || jobData.company === 'Unknown Company') {
+          return false;
+        }
+
         // Generic/placeholder role text should never count as a match —
         // two different jobs both showing "Unknown Role" are NOT the
         // same application, and treating them as such caused a false
