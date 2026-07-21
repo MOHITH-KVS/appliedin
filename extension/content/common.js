@@ -14,6 +14,25 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
 
       let matchedAgainst = null;
 
+      // Detects role text that's clearly page-chrome or a mis-detection
+      // rather than a real, distinct job title — e.g. "Career Thank you -
+      // GlobalLogic" (grabbed from a confirmation banner). Used ONLY to
+      // decide whether a same-company, close-in-time entry is likely the
+      // SAME submission caught twice by different detection paths — NOT
+      // as a general "these are probably the same job" signal, since
+      // applying to two different roles at the same company in quick
+      // succession is a completely normal, common pattern (e.g. browsing
+      // one employer's listings on Indeed) that must NOT be blocked.
+      function roleLooksLikeMisdetection(role, company) {
+        if (!role) return true;
+        const lower = role.toLowerCase();
+        if (/thank\s*you/.test(lower)) return true;
+        if (/application (submitted|received|complete)/.test(lower)) return true;
+        if (company && lower === company.toLowerCase()) return true;
+        if (role.length < 4) return true;
+        return false;
+      }
+
       const isDuplicate = applications.some(app => {
         // Same exact job URL — definitely a duplicate, regardless of when
         if (jobData.url && app.url && app.url === jobData.url) {
@@ -31,42 +50,28 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
           return false;
         }
 
-        // Generic/placeholder role text should never count as a match —
-        // two different jobs both showing "Unknown Role" are NOT the
-        // same application, and treating them as such caused a false
-        // "already applied" cascade whenever role detection failed.
-        if (app.role === 'Unknown Role' || jobData.role === 'Unknown Role') {
-          // Still catch the case where two detection methods fire for the
-          // SAME submission within a tight window — same company within
-          // 5 minutes is almost certainly one real application caught
-          // twice, not two genuinely different ones.
-          const matched = app.company.toLowerCase() === jobData.company.toLowerCase() &&
-            (new Date() - new Date(app.date)) < 5 * 60 * 1000;
-          if (matched) matchedAgainst = { reason: 'same company, unknown role, within 5min', app };
-          return matched;
-        }
+        const sameCompany = app.company.toLowerCase() === jobData.company.toLowerCase();
+        const withinTightWindow = (new Date() - new Date(app.date)) < 5 * 60 * 1000;
+        const withinDay = (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000;
 
-        // Same company + role within the last 24 hours — likely a
-        // duplicate detection firing twice on the same real application
-        if (
-          app.company.toLowerCase() === jobData.company.toLowerCase() &&
-          app.role.toLowerCase() === jobData.role.toLowerCase() &&
-          (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-        ) {
+        // Same company + IDENTICAL role within 24 hours — a real repeat.
+        if (sameCompany && app.role && jobData.role &&
+            app.role.toLowerCase() === jobData.role.toLowerCase() && withinDay) {
           matchedAgainst = { reason: 'same company+role within 24h', app };
           return true;
         }
 
-        // Same company within a tight few-minute window, even if the role
-        // TEXT differs — catches two different detection paths (e.g. a
-        // manual "log it" confirmation plus the automatic detector) both
-        // firing for the exact same real submission within seconds of
-        // each other, each capturing slightly different role text.
-        if (
-          app.company.toLowerCase() === jobData.company.toLowerCase() &&
-          (new Date() - new Date(app.date)) < 5 * 60 * 1000
-        ) {
-          matchedAgainst = { reason: 'same company within 5min (role differs)', app };
+        // Same company, close in time, AND one of the two role texts
+        // looks like a mis-detection (not a real distinct job title) —
+        // this is the narrow GlobalLogic-style pattern: two detection
+        // methods caught the SAME real submission, one with good data,
+        // one with page-chrome text. Deliberately NOT triggered just by
+        // "same company, close in time" alone — that would wrongly block
+        // legitimate back-to-back applications to different roles at the
+        // same employer.
+        if (sameCompany && withinTightWindow &&
+            (roleLooksLikeMisdetection(app.role, app.company) || roleLooksLikeMisdetection(jobData.role, jobData.company))) {
+          matchedAgainst = { reason: 'same company, one role looks like a mis-detection, within 5min', app };
           return true;
         }
 

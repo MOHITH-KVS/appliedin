@@ -1010,6 +1010,23 @@ function injectUniversalTracker(platformName) {
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
+      // Detects role text that's clearly page-chrome or a mis-detection
+      // rather than a real, distinct job title. Used ONLY to decide
+      // whether a same-company, close-in-time entry is likely the SAME
+      // submission caught twice by different detection paths — NOT as a
+      // general "these are probably the same job" signal, since applying
+      // to two different roles at the same company in quick succession
+      // is a completely normal pattern that must NOT be blocked.
+      function roleLooksLikeMisdetection(role, company) {
+        if (!role) return true;
+        const lower = role.toLowerCase();
+        if (/thank\s*you/.test(lower)) return true;
+        if (/application (submitted|received|complete)/.test(lower)) return true;
+        if (company && lower === company.toLowerCase()) return true;
+        if (role.length < 4) return true;
+        return false;
+      }
+
       const isDuplicate = applications.some(app => {
         // Same exact job URL — definitely a duplicate, regardless of when
         if (jobData.url && app.url && app.url === jobData.url) return true;
@@ -1022,38 +1039,26 @@ function injectUniversalTracker(platformName) {
           return false;
         }
 
-        // Generic/placeholder role text should never count as a match —
-        // two different jobs both showing "Unknown Role" are NOT the
-        // same application.
-        if (app.role === 'Unknown Role' || jobData.role === 'Unknown Role') {
-          // Even with unknown role, still catch the case where two
-          // detection methods fire for the SAME submission within a tight
-          // window — same company, within 5 minutes, is almost certainly
-          // one real application caught twice, not two genuine ones.
-          return (
-            app.company.toLowerCase() === jobData.company.toLowerCase() &&
-            (new Date() - new Date(app.date)) < 5 * 60 * 1000
-          );
+        const sameCompany = app.company.toLowerCase() === jobData.company.toLowerCase();
+        const withinTightWindow = (new Date() - new Date(app.date)) < 5 * 60 * 1000;
+        const withinDay = (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000;
+
+        // Same company + IDENTICAL role within 24 hours — a real repeat.
+        if (sameCompany && app.role && jobData.role &&
+            app.role.toLowerCase() === jobData.role.toLowerCase() && withinDay) {
+          return true;
         }
 
-        // Same company + role within the last 24 hours — likely a
-        // duplicate detection firing twice on the same real application
-        if (
-          app.company.toLowerCase() === jobData.company.toLowerCase() &&
-          app.role.toLowerCase() === jobData.role.toLowerCase() &&
-          (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-        ) return true;
-
-        // Same company within a tight few-minute window, even if the role
-        // TEXT differs — this is the pattern seen when two different
-        // detection paths (e.g. a manual "log it" confirmation plus the
-        // automatic confirmation-page detector) both fire for the exact
-        // same real submission within seconds of each other, each
-        // capturing slightly different role text.
-        if (
-          app.company.toLowerCase() === jobData.company.toLowerCase() &&
-          (new Date() - new Date(app.date)) < 5 * 60 * 1000
-        ) return true;
+        // Same company, close in time, AND one of the two role texts
+        // looks like a mis-detection (not a real distinct job title) —
+        // deliberately NOT triggered just by "same company, close in
+        // time" alone, since that would wrongly block legitimate
+        // back-to-back applications to different roles at the same
+        // employer.
+        if (sameCompany && withinTightWindow &&
+            (roleLooksLikeMisdetection(app.role, app.company) || roleLooksLikeMisdetection(jobData.role, jobData.company))) {
+          return true;
+        }
 
         return false;
       });
