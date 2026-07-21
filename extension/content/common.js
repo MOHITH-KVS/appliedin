@@ -16,13 +16,40 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
         // Same exact job URL — definitely a duplicate, regardless of when
         if (jobData.url && app.url && app.url === jobData.url) return true;
 
+        // Generic/placeholder role text should never count as a match —
+        // two different jobs both showing "Unknown Role" are NOT the
+        // same application, and treating them as such caused a false
+        // "already applied" cascade whenever role detection failed.
+        if (app.role === 'Unknown Role' || jobData.role === 'Unknown Role') {
+          // Still catch the case where two detection methods fire for the
+          // SAME submission within a tight window — same company within
+          // 5 minutes is almost certainly one real application caught
+          // twice, not two genuinely different ones.
+          return (
+            app.company.toLowerCase() === jobData.company.toLowerCase() &&
+            (new Date() - new Date(app.date)) < 5 * 60 * 1000
+          );
+        }
+
         // Same company + role within the last 24 hours — likely a
         // duplicate detection firing twice on the same real application
-        return (
+        if (
           app.company.toLowerCase() === jobData.company.toLowerCase() &&
           app.role.toLowerCase() === jobData.role.toLowerCase() &&
           (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-        );
+        ) return true;
+
+        // Same company within a tight few-minute window, even if the role
+        // TEXT differs — catches two different detection paths (e.g. a
+        // manual "log it" confirmation plus the automatic detector) both
+        // firing for the exact same real submission within seconds of
+        // each other, each capturing slightly different role text.
+        if (
+          app.company.toLowerCase() === jobData.company.toLowerCase() &&
+          (new Date() - new Date(app.date)) < 5 * 60 * 1000
+        ) return true;
+
+        return false;
       });
 
       if (isDuplicate) {

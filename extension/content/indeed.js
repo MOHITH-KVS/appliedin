@@ -19,6 +19,17 @@
   }
 
   let lastHandledUrl = null;
+  let lastHandledAt = 0;
+  const REARM_COOLDOWN_MS = 8000;
+
+  function isRecentlyHandled() {
+    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
+  }
+
+  function markHandled() {
+    lastHandledUrl = normalizedUrl();
+    lastHandledAt = Date.now();
+  }
 
   // SPA-style portals often mutate query strings/hash on internal
   // navigation without a real reload - comparing origin+pathname only
@@ -87,18 +98,32 @@
     }
   }
 
+  // The confirmation heading ("Your application has been submitted!") is
+  // often the ONLY h1/h2 on this page — grabbing it as if it were the job
+  // role was a serious bug: it's identical across every single Indeed
+  // application, which meant every later application would also get this
+  // same text and get falsely flagged as a duplicate of the first one.
+  function looksLikeConfirmationMessage(text) {
+    if (!text) return true;
+    const lower = text.toLowerCase();
+    return successPhrases.some(p => lower.includes(p)) ||
+      lower.includes('submitted') || lower.includes('thank you') ||
+      lower.includes('congratulations');
+  }
+
   // Fallback: on the smartapply summary card itself (seen on the right side
   // of the apply flow), the role/company are often shown even though the
   // rest of the DOM is unfamiliar. Never returns null — this is the last
   // resort before showing the popup, so it must always produce something.
   function getJobDetailsFromApplySummary() {
     try {
-      const role = document.querySelector('h1, h2')?.innerText?.trim() || 'Unknown Role';
-      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || 'Unknown Company';
+      const h1Text = document.querySelector('h1, h2')?.innerText?.trim();
+      const role = (h1Text && !looksLikeConfirmationMessage(h1Text)) ? h1Text : null;
+      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || null;
 
       return {
-        company: companyLine,
-        role,
+        company: companyLine || 'Unknown Company',
+        role: role || 'Unknown Role',
         location: 'Unknown Location',
         platform: 'Indeed',
         url: window.location.href,
@@ -145,8 +170,8 @@
   }
 
   function handleFinalSuccess() {
-    if (lastHandledUrl === normalizedUrl()) return;
-    lastHandledUrl = normalizedUrl();
+    if (isRecentlyHandled()) return;
+    markHandled();
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetailsFromApplySummary();
@@ -159,7 +184,7 @@
         });
       } else {
         // couldn't read anything — allow a later mutation to retry
-        lastHandledUrl = null;
+        lastHandledUrl = null; lastHandledAt = 0;
       }
     });
   }
@@ -214,7 +239,7 @@
     if (window.location.href === lastCheckedUrl) return;
     lastCheckedUrl = window.location.href;
 
-    if (lastHandledUrl === normalizedUrl()) return;
+    if (isRecentlyHandled()) return;
     if (urlLooksLikeFinalSuccess()) {
       setTimeout(handleFinalSuccess, 800);
     }

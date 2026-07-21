@@ -21,6 +21,17 @@
   // subsequent DOM mutation on a static "success" page (the success text
   // never disappears, so a boolean flag alone would loop forever).
   let lastHandledUrl = null;
+  let lastHandledAt = 0;
+  const REARM_COOLDOWN_MS = 8000;
+
+  function isRecentlyHandled() {
+    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
+  }
+
+  function markHandled() {
+    lastHandledUrl = normalizedUrl();
+    lastHandledAt = Date.now();
+  }
 
   // SPA-style portals often mutate query strings/hash on internal
   // navigation without a real reload - comparing origin+pathname only
@@ -117,8 +128,8 @@
   }
 
   function handleFinalSuccess() {
-    if (lastHandledUrl === normalizedUrl()) return;
-    lastHandledUrl = normalizedUrl();
+    if (isRecentlyHandled()) return;
+    markHandled();
 
     const jobData = getJobDetails();
     if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
@@ -129,7 +140,7 @@
       });
     } else {
       // couldn't read anything — allow a later mutation to retry
-      lastHandledUrl = null;
+      lastHandledUrl = null; lastHandledAt = 0;
     }
   }
 
@@ -161,7 +172,7 @@
       text.includes('send application');
 
     if (isFinalSubmit) {
-      if (lastHandledUrl === normalizedUrl()) return;
+      if (isRecentlyHandled()) return;
 
       setTimeout(() => {
         const jobData = getJobDetails();
@@ -169,7 +180,7 @@
 
         if (!successDetected) return; // not actually done yet — stay silent
 
-        lastHandledUrl = normalizedUrl();
+        markHandled();
 
         if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
           saveApplication(jobData);
@@ -191,7 +202,7 @@
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === normalizedUrl()) return;
+      if (isRecentlyHandled()) return;
       if (bodyLooksLikeFinalSuccess()) {
         setTimeout(handleFinalSuccess, 1000);
       }

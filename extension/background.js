@@ -587,6 +587,8 @@ function injectUniversalTracker(platformName) {
   console.log('[AppliedIn] universal tracker loaded on', window.location.href, '(platform:', platformName + ')');
 
   let lastHandledUrl = null;
+  let lastHandledAt = 0;
+  const REARM_COOLDOWN_MS = 8000;
 
   // Many SPA-style career portals (Workday in particular) mutate the URL's
   // query string or hash on internal navigation without a real page
@@ -595,6 +597,20 @@ function injectUniversalTracker(platformName) {
   // the same screen. Comparing origin+pathname only is far more stable.
   function normalizedUrl() {
     return window.location.origin + window.location.pathname;
+  }
+
+  // Blocks immediate re-triggers for the SAME event (multiple detection
+  // methods firing within moments of each other), while still allowing a
+  // genuinely NEW, later application on the same page — e.g. a
+  // "Recommended jobs for you" widget where someone applies to a second
+  // job shortly after the first — to be caught once the cooldown passes.
+  function isRecentlyHandled() {
+    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
+  }
+
+  function markHandled() {
+    lastHandledUrl = normalizedUrl();
+    lastHandledAt = Date.now();
   }
 
   // Only genuinely FINAL submit labels trigger a completion check.
@@ -714,8 +730,8 @@ function injectUniversalTracker(platformName) {
   }
 
   function handleDetectedSuccess() {
-    if (lastHandledUrl === normalizedUrl()) return;
-    lastHandledUrl = normalizedUrl();
+    if (isRecentlyHandled()) return;
+    markHandled();
 
     const jobData = getPageDetails();
     if (jobData && jobData.confident) {
@@ -730,11 +746,11 @@ function injectUniversalTracker(platformName) {
   // popup here rather than auto-saving — this signal is weaker than an
   // exact phrase match, so we ask rather than guess silently.
   function handlePossibleSuccess(formRef) {
-    if (lastHandledUrl === normalizedUrl()) return true;
+    if (isRecentlyHandled()) return true;
     if (pageLooksLikeError()) return false;
     if (!hasGenericSuccessElement() && !formDisappeared(formRef)) return false;
 
-    lastHandledUrl = normalizedUrl();
+    markHandled();
     const jobData = getPageDetails();
     if (jobData) showConfirmPopup();
     return true;
@@ -998,11 +1014,40 @@ function injectUniversalTracker(platformName) {
         // Same exact job URL — definitely a duplicate, regardless of when
         if (jobData.url && app.url && app.url === jobData.url) return true;
 
-        return (
+        // Generic/placeholder role text should never count as a match —
+        // two different jobs both showing "Unknown Role" are NOT the
+        // same application.
+        if (app.role === 'Unknown Role' || jobData.role === 'Unknown Role') {
+          // Even with unknown role, still catch the case where two
+          // detection methods fire for the SAME submission within a tight
+          // window — same company, within 5 minutes, is almost certainly
+          // one real application caught twice, not two genuine ones.
+          return (
+            app.company.toLowerCase() === jobData.company.toLowerCase() &&
+            (new Date() - new Date(app.date)) < 5 * 60 * 1000
+          );
+        }
+
+        // Same company + role within the last 24 hours — likely a
+        // duplicate detection firing twice on the same real application
+        if (
           app.company.toLowerCase() === jobData.company.toLowerCase() &&
           app.role.toLowerCase() === jobData.role.toLowerCase() &&
           (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
-        );
+        ) return true;
+
+        // Same company within a tight few-minute window, even if the role
+        // TEXT differs — this is the pattern seen when two different
+        // detection paths (e.g. a manual "log it" confirmation plus the
+        // automatic confirmation-page detector) both fire for the exact
+        // same real submission within seconds of each other, each
+        // capturing slightly different role text.
+        if (
+          app.company.toLowerCase() === jobData.company.toLowerCase() &&
+          (new Date() - new Date(app.date)) < 5 * 60 * 1000
+        ) return true;
+
+        return false;
       });
 
       if (isDuplicate) {
@@ -1036,7 +1081,7 @@ function injectUniversalTracker(platformName) {
   // Method 2 below is the real authority: it only acts once genuine
   // success text actually appears anywhere on the page.
   document.addEventListener('click', function (e) {
-    if (lastHandledUrl === normalizedUrl()) return;
+    if (isRecentlyHandled()) return;
 
     const element = e.target.closest('button, input[type="submit"], input[type="button"], a');
     if (!element) return;
@@ -1056,9 +1101,19 @@ function injectUniversalTracker(platformName) {
     // language-independent fallback signal if no phrase/URL matches.
     const formRef = element.closest('form');
 
+    // Snapshot whether success signals are ALREADY present before this
+    // click — if a confirmation banner is stale leftover DOM (e.g. from
+    // testing the same form a second time), it would already be true
+    // here, and we must not mistake it for something THIS click caused.
+    const alreadyConfirmedBeforeClick = urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess();
+
     setTimeout(() => {
-      if (lastHandledUrl === normalizedUrl()) return;
-      if (urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess()) {
+      if (isRecentlyHandled()) return;
+
+      const confirmedNow = urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess();
+
+      if (confirmedNow && !alreadyConfirmedBeforeClick) {
+        // Genuinely NEW confirmation, caused by this click.
         handleDetectedSuccess();
         return;
       }
@@ -1088,7 +1143,7 @@ function injectUniversalTracker(platformName) {
   // is what makes it safe from the multi-section-form false-positive
   // risk that ambiguous words like "Apply" would otherwise cause.
   document.addEventListener('click', function (e) {
-    if (lastHandledUrl === normalizedUrl()) return;
+    if (isRecentlyHandled()) return;
 
     const element = e.target.closest('button, a');
     if (!element) return;
@@ -1100,7 +1155,7 @@ function injectUniversalTracker(platformName) {
     const originalText = element.innerText;
 
     setTimeout(() => {
-      if (lastHandledUrl === normalizedUrl()) return;
+      if (isRecentlyHandled()) return;
       if (!document.body.contains(element)) return;
 
       const newText = (element.innerText || '').trim();
@@ -1132,7 +1187,7 @@ function injectUniversalTracker(platformName) {
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === normalizedUrl()) return;
+      if (isRecentlyHandled()) return;
 
       const currentlyHasSuccessText = bodyLooksLikeSuccess();
       const isNewTransition = currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad;
@@ -1294,7 +1349,7 @@ function injectUniversalTracker(platformName) {
       // This wasn't actually a completion — allow a later, genuine
       // submission on this same page (common on multi-section forms
       // like Amazon Jobs) to still be caught instead of going silent.
-      lastHandledUrl = null;
+      lastHandledUrl = null; lastHandledAt = 0;
     });
   }
 

@@ -20,6 +20,17 @@
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
+  let lastHandledAt = 0;
+  const REARM_COOLDOWN_MS = 8000;
+
+  function isRecentlyHandled() {
+    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
+  }
+
+  function markHandled() {
+    lastHandledUrl = normalizedUrl();
+    lastHandledAt = Date.now();
+  }
 
   // SPA-style portals often mutate query strings/hash on internal
   // navigation without a real reload - comparing origin+pathname only
@@ -143,8 +154,8 @@
   }
 
   function handleSuccess() {
-    if (lastHandledUrl === normalizedUrl()) return;
-    lastHandledUrl = normalizedUrl();
+    if (isRecentlyHandled()) return;
+    markHandled();
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
@@ -157,7 +168,7 @@
           // user answered — this URL stays marked as handled
         });
       } else {
-        lastHandledUrl = null;
+        lastHandledUrl = null; lastHandledAt = 0;
       }
     });
   }
@@ -183,7 +194,7 @@
       text === 'submit' ||
       text === 'done'
     ) {
-      if (lastHandledUrl === normalizedUrl()) return;
+      if (isRecentlyHandled()) return;
 
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
@@ -200,7 +211,7 @@
   const observer = new MutationObserver(function () {
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
-      if (lastHandledUrl === normalizedUrl()) return;
+      if (isRecentlyHandled()) return;
       if (bodyLooksLikeSuccess()) {
         setTimeout(handleSuccess, 1000);
       }
