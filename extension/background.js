@@ -1010,6 +1010,21 @@ function injectUniversalTracker(platformName) {
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
+      // A URL with no query string that ends in a generic confirmation
+      // path (post-apply, thank-you, success, etc.) is often IDENTICAL
+      // across every application on that site — using it as a dedup key
+      // would make every such application collide with any previous one.
+      function urlLooksGeneric(url) {
+        if (!url) return true;
+        try {
+          const u = new URL(url);
+          if (u.search) return false; // has query params — likely job-specific
+          return /post-apply|thank-?you|\/success\/?$|\/confirmation\/?$|\/applied\/?$/i.test(u.pathname);
+        } catch (e) {
+          return false;
+        }
+      }
+
       // Detects role text that's clearly page-chrome or a mis-detection
       // rather than a real, distinct job title. Used ONLY to decide
       // whether a same-company, close-in-time entry is likely the SAME
@@ -1028,8 +1043,10 @@ function injectUniversalTracker(platformName) {
       }
 
       const isDuplicate = applications.some(app => {
-        // Same exact job URL — definitely a duplicate, regardless of when
-        if (jobData.url && app.url && app.url === jobData.url) return true;
+        // Same exact job URL — definitely a duplicate, regardless of when.
+        // Excludes generic confirmation-page URLs, which are identical
+        // across every application on a site.
+        if (jobData.url && app.url && app.url === jobData.url && !urlLooksGeneric(jobData.url)) return true;
 
         // Generic/placeholder text should NEVER count as a match basis —
         // "Unknown Company" === "Unknown Company" would otherwise flag

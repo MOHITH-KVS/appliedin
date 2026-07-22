@@ -126,7 +126,14 @@
         role: role || 'Unknown Role',
         location: 'Unknown Location',
         platform: 'Indeed',
-        url: window.location.href,
+        // Deliberately NOT window.location.href here — this confirmation
+        // page's URL (smartapply.indeed.com/.../post-apply) is generic
+        // and IDENTICAL across every single Indeed application. Using it
+        // as the dedup key was making every fallback-detected application
+        // match any previous one via the exact-URL duplicate check —
+        // completely bypassing the company/role comparison logic, since
+        // that check runs first and returns immediately.
+        url: '',
         date: new Date().toISOString(),
         status: 'Applied'
       };
@@ -136,7 +143,7 @@
         role: 'Unknown Role',
         location: 'Unknown Location',
         platform: 'Indeed',
-        url: window.location.href,
+        url: '',
         date: new Date().toISOString(),
         status: 'Applied'
       };

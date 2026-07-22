@@ -14,6 +14,22 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
 
       let matchedAgainst = null;
 
+      // A URL with no query string that ends in a generic confirmation
+      // path (post-apply, thank-you, success, etc.) is often IDENTICAL
+      // across every application on that site — using it as a dedup key
+      // would make every such application collide with any previous one.
+      // This is exactly what happened with Indeed's smartapply flow.
+      function urlLooksGeneric(url) {
+        if (!url) return true;
+        try {
+          const u = new URL(url);
+          if (u.search) return false; // has query params — likely job-specific
+          return /post-apply|thank-?you|\/success\/?$|\/confirmation\/?$|\/applied\/?$/i.test(u.pathname);
+        } catch (e) {
+          return false;
+        }
+      }
+
       // Detects role text that's clearly page-chrome or a mis-detection
       // rather than a real, distinct job title — e.g. "Career Thank you -
       // GlobalLogic" (grabbed from a confirmation banner). Used ONLY to
@@ -34,8 +50,12 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       }
 
       const isDuplicate = applications.some(app => {
-        // Same exact job URL — definitely a duplicate, regardless of when
-        if (jobData.url && app.url && app.url === jobData.url) {
+        // Same exact job URL — definitely a duplicate, regardless of when.
+        // Deliberately excludes generic confirmation-page URLs (see
+        // urlLooksGeneric above) — those are identical across every
+        // application on a site and would otherwise make every one of
+        // them collide with any previous one.
+        if (jobData.url && app.url && app.url === jobData.url && !urlLooksGeneric(jobData.url)) {
           matchedAgainst = { reason: 'same URL', app };
           return true;
         }
