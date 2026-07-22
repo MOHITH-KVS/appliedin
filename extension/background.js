@@ -551,11 +551,24 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   const isExcludedPage = excludedPathPatterns.some(p => url.includes(p));
 
   const isGoogleForm = url.includes('docs.google.com/forms/');
+  const title = (tab.title || '').toLowerCase();
 
-  const isJobPage = !isExcludedPage && (isGoogleForm || jobKeywords.some(keyword => url.includes(keyword)));
+  // Also check the tab title — free (no extra injection), and catches
+  // career pages whose URL structure doesn't obviously say "career" or
+  // "job" (e.g. a company's own custom-branded ATS with a generic-looking
+  // URL) but whose page title does, like "Careers at Honeywell".
+  const isJobPage = !isExcludedPage && (
+    isGoogleForm ||
+    jobKeywords.some(keyword => url.includes(keyword)) ||
+    jobKeywords.some(keyword => title.includes(keyword))
+  );
 
   if (isGoogleForm && !isExcludedPage) {
     console.log('[AppliedIn] Google Form detected, injecting tracker:', url);
+  } else if (isJobPage) {
+    console.log('[AppliedIn] Job page matched, injecting tracker:', url, '| title:', tab.title);
+  } else {
+    console.log('[AppliedIn] Not matched as job page, skipping:', url, '| title:', tab.title);
   }
 
   if (!isJobPage) {
