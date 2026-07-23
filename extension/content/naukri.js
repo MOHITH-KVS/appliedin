@@ -50,9 +50,9 @@
 
       const company =
         structured?.company ||
-        document.querySelector('.jd-header-comp-name a')?.innerText?.trim() ||
-        document.querySelector('.jd-header-comp-name')?.innerText?.trim() ||
-        document.querySelector('[class*="comp-name"]')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.jd-header-comp-name a')?.innerText?.trim()) ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.jd-header-comp-name')?.innerText?.trim()) ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[class*="comp-name"]')?.innerText?.trim()) ||
         'Unknown Company';
 
       const location =

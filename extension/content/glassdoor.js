@@ -65,8 +65,8 @@
 
       const company =
         structured?.company ||
-        document.querySelector('[data-test="employer-name"]')?.innerText?.trim() ||
-        document.querySelector('[class*="employerName"]')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[data-test="employer-name"]')?.innerText?.trim()) ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[class*="employerName"]')?.innerText?.trim()) ||
         'Unknown Company';
 
       const location =

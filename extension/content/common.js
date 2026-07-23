@@ -361,7 +361,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
   // strips known transient prefixes and flags text that still looks
   // unusable afterward, so callers can fall back to asking instead of
   // confidently saving garbage.
-  function cleanAndValidateRole(text) {
+  function cleanAndValidateText(text) {
     if (!text) return null;
 
     let cleaned = text.trim();
@@ -379,19 +379,19 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     }
 
     // Still looks like leftover status text, or too short to be a real
-    // role name, or ends mid-sentence with "..."
+    // role/company name, or ends mid-sentence with "..."
     if (
       !cleaned ||
-      cleaned.length < 3 ||
+      cleaned.length < 2 ||
       /\.\.\.$/.test(cleaned) ||
-      /^(applying|submitting|loading|processing|please wait)$/i.test(cleaned)
+      /^(applying|submitting|loading|processing|please wait|applying for)$/i.test(cleaned)
     ) {
       return null;
     }
 
     // Greeting banners and dashboard chrome ("Welcome, [Name]...", "Hi
     // there", "My Applications") also get accidentally grabbed by generic
-    // h1/h2 selectors — reject those patterns too.
+    // selectors — reject those patterns too.
     const lower = cleaned.toLowerCase();
     if (
       /^welcome\b/.test(lower) ||
@@ -406,5 +406,14 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     return cleaned;
   }
 
-  return { saveApplication, showNotification, showConfirmPopup, getStructuredJobData, cleanAndValidateRole };
+  // Same validator, used for both fields — the transient-text problem
+  // ("Applying for...", "Submitting...") shows up identically whether it
+  // leaks into the role or the company field.
+  const cleanAndValidateRole = cleanAndValidateText;
+  const cleanAndValidateCompany = cleanAndValidateText;
+
+  return {
+    saveApplication, showNotification, showConfirmPopup, getStructuredJobData,
+    cleanAndValidateRole, cleanAndValidateCompany
+  };
 })();

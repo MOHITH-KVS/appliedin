@@ -124,7 +124,9 @@
         textFromSelector('.company-name'),
         textFromSelector('[class*="company"]')
       ];
-      const company = companyCandidates.find(c => c && !looksLikeGarbledConcatenation(c)) || 'Unknown Company';
+      const company = companyCandidates
+        .map(c => clean ? clean(c) : c)
+        .find(c => c && !looksLikeGarbledConcatenation(c)) || 'Unknown Company';
 
       const location =
         structured?.location ||

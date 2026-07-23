@@ -72,8 +72,8 @@
 
       const company =
         structured?.company ||
-        document.querySelector('[data-company-name="true"]')?.innerText?.trim() ||
-        document.querySelector('[class*="companyName"]')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[data-company-name="true"]')?.innerText?.trim()) ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[class*="companyName"]')?.innerText?.trim()) ||
         null;
 
       const location =
@@ -119,7 +119,9 @@
     try {
       const h1Text = document.querySelector('h1, h2')?.innerText?.trim();
       const role = (h1Text && !looksLikeConfirmationMessage(h1Text)) ? h1Text : null;
-      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || null;
+      const companyLine = window.__appliedinCommon?.cleanAndValidateCompany?.(
+        document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim()
+      ) || null;
 
       return {
         company: companyLine || 'Unknown Company',

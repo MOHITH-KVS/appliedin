@@ -67,9 +67,9 @@
 
       const company =
         structured?.company ||
-        document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
-        document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
-        document.querySelector('a[href*="/company/"]')?.innerText?.trim() ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim()) ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim()) ||
+        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('a[href*="/company/"]')?.innerText?.trim()) ||
         tabTitle.company ||
         'Unknown Company';
 

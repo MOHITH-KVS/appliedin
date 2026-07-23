@@ -879,6 +879,10 @@ function injectUniversalTracker(platformName) {
     if (/^(hi|hello|hey)\b/.test(lower)) return true;
     if (/^you have\b/.test(lower)) return true;
     if (/^my (applications|progress|profile|account)\b/.test(lower)) return true;
+    // Transient loading-state text ("Applying for...", "Submitting...")
+    // occasionally gets grabbed mid-animation, before the real content
+    // has rendered.
+    if (/^(applying for|apply for|submitting|please wait|loading|processing)\b/.test(lower)) return true;
     // Job titles are essentially never this long — a paragraph or
     // greeting banner accidentally grabbed by an h1/h2 selector usually is
     if (text.length > 80) return true;

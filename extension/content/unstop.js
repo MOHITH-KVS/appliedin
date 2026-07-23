@@ -95,7 +95,9 @@
         document.querySelector('[class*="org-name"]')?.innerText?.trim(),
         document.querySelector('[class*="company"]')?.innerText?.trim()
       ];
-      const company = companyCandidates.find(c => c && !isGenericText(c)) || 'Unknown Company';
+      const company = companyCandidates.find(c =>
+        c && !isGenericText(c) && window.__appliedinCommon?.cleanAndValidateCompany?.(c)
+      ) || 'Unknown Company';
 
       const location =
         structured?.location ||
