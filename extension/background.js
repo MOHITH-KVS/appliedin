@@ -539,6 +539,21 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     'zohorecruit', 'freshteam', 'keka', 'darwinbox', 'peoplestrong'
   ];
 
+  // Hard exclusions — these should NEVER be watched, regardless of any
+  // URL/title keyword match. Once the tracker is mistakenly injected into
+  // a single-page app like Gmail, it keeps running for that tab's entire
+  // lifetime (these apps never do a full page reload), continuously
+  // scanning their own UI — which is exactly what caused a "Company name:
+  // Mail" popup to appear while just checking email.
+  const excludedDomains = [
+    'mail.google.com', 'outlook.live.com', 'outlook.office.com', 'outlook.office365.com',
+    'mail.yahoo.com', 'calendar.google.com', 'drive.google.com',
+    'docs.google.com/document', 'docs.google.com/spreadsheets', 'docs.google.com/presentation',
+    'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com',
+    'netflix.com', 'whatsapp.com', 'web.whatsapp.com', 'claude.ai', 'chatgpt.com'
+  ];
+  const isExcludedDomain = excludedDomains.some(d => url.includes(d));
+
   // Google Forms is a common way companies (especially for off-campus
   // hiring in India) collect applications, but its URLs are auto-generated
   // IDs like docs.google.com/forms/d/e/1FAIpQLS.../viewform — they never
@@ -548,7 +563,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   // application") — never a real submission confirmation. Exclude these
   // regardless of whether the URL also happens to contain a job keyword.
   const excludedPathPatterns = ['/chat/', '/message', '/inbox', '/conversation'];
-  const isExcludedPage = excludedPathPatterns.some(p => url.includes(p));
+  const isExcludedPage = isExcludedDomain || excludedPathPatterns.some(p => url.includes(p));
 
   const isGoogleForm = url.includes('docs.google.com/forms/');
   const title = (tab.title || '').toLowerCase();
@@ -685,7 +700,10 @@ function injectUniversalTracker(platformName) {
     'thankyou', 'thank-you', 'thank_you', 'applythankyou',
     'application-submitted', 'applysuccess', 'apply-success',
     'applicationsuccess', 'confirmation', 'applied=1',
-    'status=success', 'status=offline-success', 'submitted=true'
+    'status=success', 'status=offline-success', 'submitted=true',
+    // Google Forms' own URL convention after a real submission — very
+    // reliable, since Google controls this format consistently.
+    'formresponse'
   ];
 
   function urlLooksLikeSuccess() {
