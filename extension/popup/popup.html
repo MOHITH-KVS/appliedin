@@ -13,7 +13,6 @@
     <div class="header-left">
       <span class="logo">📋</span>
       <span class="app-name">AppliedIn</span>
-      <span class="app-version" id="appVersion"></span>
     </div>
     <div class="header-right">
       <span class="total-count" id="totalCount">0 Total</span>
@@ -22,29 +21,26 @@
 
   <!-- Stats Bar -->
   <div class="stats-bar">
-    <div class="stat" data-period="today">
+    <div class="stat">
       <div class="stat-value" id="statToday">0</div>
       <div class="stat-label">Today</div>
     </div>
     <div class="stat-divider"></div>
-    <div class="stat" data-period="yesterday">
+    <div class="stat">
       <div class="stat-value" id="statYesterday">0</div>
       <div class="stat-label">Yesterday</div>
     </div>
     <div class="stat-divider"></div>
-    <div class="stat" data-period="week">
+    <div class="stat">
       <div class="stat-value" id="statWeek">0</div>
       <div class="stat-label">This Week</div>
     </div>
     <div class="stat-divider"></div>
-    <div class="stat" data-period="month">
+    <div class="stat">
       <div class="stat-value" id="statMonth">0</div>
       <div class="stat-label">This Month</div>
     </div>
   </div>
-
-  <!-- Weekly Summary -->
-  <div class="weekly-summary" id="weeklySummary" style="display:none;"></div>
 
   <!-- Search Bar -->
   <div class="search-wrap">
@@ -57,15 +53,13 @@
   </div>
 
   <!-- Filter Tabs -->
-  <div class="filter-tabs-wrap">
-    <div class="filter-tabs">
-      <button class="tab active" data-filter="all">All</button>
-      <button class="tab" data-filter="Applied">Applied</button>
-      <button class="tab" data-filter="In Review">In Review</button>
-      <button class="tab" data-filter="Interview">Interview</button>
-      <button class="tab" data-filter="Shortlisted">Shortlisted</button>
-      <button class="tab" data-filter="Rejected">Rejected</button>
-    </div>
+  <div class="filter-tabs">
+    <button class="tab active" data-filter="all">All</button>
+    <button class="tab" data-filter="Applied">Applied</button>
+    <button class="tab" data-filter="In Review">In Review</button>
+    <button class="tab" data-filter="Interview">Interview</button>
+    <button class="tab" data-filter="Shortlisted">Shortlisted</button>
+    <button class="tab" data-filter="Rejected">Rejected</button>
   </div>
 
   <!-- Applications List -->
@@ -83,9 +77,6 @@
     <button class="btn-add" id="btnAdd">+ Add Manually</button>
     <button class="btn-export" id="btnExport">⬇ CSV</button>
     <button class="btn-excel" id="btnExcel">📊 Excel</button>
-  </div>
-  <div class="tip-text">
-    💡 Tip: right-click any page and choose "Log this application" — works everywhere, even where auto-detect can't reach.
   </div>
 
   <!-- Manual Add Modal -->
@@ -168,7 +159,7 @@
     </div>
   </div>
 
-  <script src="../xlsx.full.min.js"></script>
+  <script src="db.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

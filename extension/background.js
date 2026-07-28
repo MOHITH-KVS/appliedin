@@ -1,218 +1,6 @@
 // AppliedIn - Background Service Worker
 // Handles ALL websites universally — captures on confirmation only
 
-// ── Google Analytics (GA4 Measurement Protocol) ──
-// Chrome extensions (Manifest V3) can't load Google's regular gtag.js
-// script due to CSP restrictions on remotely-hosted code, so we send
-// events as plain HTTPS requests instead — Google's own recommended
-// approach for extensions. Analytics failures are always swallowed
-// silently; they must never affect the extension's actual job-tracking.
-const GA_MEASUREMENT_ID = 'G-YRR8V9LW8D';
-const GA_API_SECRET = 'vJrg6JjDTmClwwAbtkZ1oA';
-
-function getOrCreateClientId(callback) {
-  chrome.storage.local.get(['appliedin_ga_client_id'], function (result) {
-    if (result.appliedin_ga_client_id) {
-      callback(result.appliedin_ga_client_id);
-      return;
-    }
-    const newId = (self.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)));
-    chrome.storage.local.set({ appliedin_ga_client_id: newId }, function () {
-      callback(newId);
-    });
-  });
-}
-
-function sendGAEvent(eventName, params) {
-  getOrCreateClientId(function (clientId) {
-    fetch(
-      `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          client_id: clientId,
-          events: [{ name: eventName, params: params || {} }]
-        })
-      }
-    ).catch(() => {
-      // Analytics is best-effort — never let a network hiccup here
-      // affect anything else the extension does.
-    });
-  });
-}
-
-chrome.runtime.onInstalled.addListener(function (details) {
-  if (details.reason === 'install') {
-    sendGAEvent('extension_installed', { version: chrome.runtime.getManifest().version });
-    tryImportFromSync();
-  } else if (details.reason === 'update') {
-    sendGAEvent('extension_updated', {
-      version: chrome.runtime.getManifest().version,
-      previous_version: details.previousVersion
-    });
-  }
-
-  // Daily check for stale "Applied" entries worth following up on
-  chrome.alarms.create('appliedin_followup_check', { periodInMinutes: 60 * 24, delayInMinutes: 1 });
-});
-
-// Also run a check on every browser startup, not just once a day from
-// install time — covers the common case of a browser that's closed
-// overnight and only reopened the next day.
-chrome.runtime.onStartup.addListener(function () {
-  checkForStaleApplications();
-});
-
-chrome.alarms.onAlarm.addListener(function (alarm) {
-  if (alarm.name === 'appliedin_followup_check') {
-    checkForStaleApplications();
-  }
-});
-
-const FOLLOWUP_THRESHOLD_DAYS = 7;
-
-function checkForStaleApplications() {
-  chrome.storage.local.get(['applications'], function (result) {
-    const applications = result.applications || [];
-    const now = Date.now();
-    const thresholdMs = FOLLOWUP_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
-
-    const stale = applications.filter(app => {
-      if (app.status !== 'Applied') return false; // already moved forward — no nag needed
-      const appliedAt = new Date(app.date).getTime();
-      if (!appliedAt) return false;
-
-      const daysSinceApplied = now - appliedAt;
-      if (daysSinceApplied < thresholdMs) return false;
-
-      // Remind once per week per entry, not every single day forever —
-      // avoids becoming naggy for older applications.
-      const lastReminded = app._lastReminded || 0;
-      return (now - lastReminded) >= thresholdMs;
-    });
-
-    if (stale.length === 0) return;
-
-    if (stale.length === 1) {
-      const app = stale[0];
-      const daysAgo = Math.floor((now - new Date(app.date).getTime()) / (24 * 60 * 60 * 1000));
-      chrome.notifications.create('appliedin_followup_' + Date.now(), {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: '📋 AppliedIn — Follow-up reminder',
-        message: `You applied to ${app.company} (${app.role}) ${daysAgo} days ago — still no response. Might be worth following up.`,
-        priority: 1
-      });
-    } else {
-      chrome.notifications.create('appliedin_followup_' + Date.now(), {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: '📋 AppliedIn — Follow-up reminder',
-        message: `You have ${stale.length} applications with no response in ${FOLLOWUP_THRESHOLD_DAYS}+ days. Worth checking in on them.`,
-        priority: 1
-      });
-    }
-
-    // Mark these as reminded so we don't nag again until next week
-    const staleUrls = new Set(stale.map(a => a.url));
-    const updated = applications.map(app =>
-      staleUrls.has(app.url) ? { ...app, _lastReminded: now } : app
-    );
-    chrome.storage.local.set({ applications: updated });
-
-    sendGAEvent('followup_reminder_shown', { count: stale.length });
-  });
-}
-
-// Open the popup-equivalent (extension's own page) when a reminder is clicked
-chrome.notifications.onClicked.addListener(function () {
-  chrome.action.openPopup?.();
-});
-
-// ── Chrome Sync mirroring ──
-// chrome.storage.sync is tiny (100KB total, 8KB per item, 512 items max) —
-// nowhere near enough for a full application history, so local storage
-// (unlimited) remains the source of truth. This mirrors only the most
-// recent entries, in a compact format, chunked across multiple keys to
-// stay under the per-item limit — enough for cross-device continuity on
-// an active job search without pretending sync can hold everything.
-const SYNC_MAX_ENTRIES = 100;
-const SYNC_CHUNK_SIZE = 20;
-
-function mirrorToSync(applications) {
-  const recent = applications.slice(0, SYNC_MAX_ENTRIES);
-  const compact = recent.map(a => ({
-    c: a.company, r: a.role, p: a.platform, d: a.date, s: a.status, u: a.url || '', l: a.location || ''
-  }));
-
-  const chunks = [];
-  for (let i = 0; i < compact.length; i += SYNC_CHUNK_SIZE) {
-    chunks.push(compact.slice(i, i + SYNC_CHUNK_SIZE));
-  }
-
-  chrome.storage.sync.get(null, function (existing) {
-    const staleKeys = Object.keys(existing || {}).filter(k => {
-      if (!k.startsWith('appliedin_sync_') || k === 'appliedin_sync_meta') return false;
-      const idx = parseInt(k.replace('appliedin_sync_', ''), 10);
-      return idx >= chunks.length;
-    });
-
-    const writeData = { appliedin_sync_meta: { chunkCount: chunks.length, updatedAt: Date.now() } };
-    chunks.forEach((chunk, idx) => {
-      writeData['appliedin_sync_' + idx] = chunk;
-    });
-
-    const finish = () => chrome.storage.sync.set(writeData).catch(() => {
-      // Sync can fail (offline, not signed in, quota) — local data is
-      // always safe regardless, so this is fine to just skip silently.
-    });
-
-    if (staleKeys.length) {
-      chrome.storage.sync.remove(staleKeys, finish);
-    } else {
-      finish();
-    }
-  });
-}
-
-// Whenever local storage's applications list changes — from ANY script,
-// content script or popup — mirror the update to sync. Centralizing this
-// here via onChanged means we don't need to touch every single save path
-// across all six site scripts individually.
-chrome.storage.onChanged.addListener(function (changes, areaName) {
-  if (areaName === 'local' && changes.applications) {
-    mirrorToSync(changes.applications.newValue || []);
-  }
-});
-
-// On a fresh install with empty local storage, check whether sync has
-// data from another device and import it — the actual "switched laptops
-// mid-search" continuity fix.
-function tryImportFromSync() {
-  chrome.storage.local.get(['applications'], function (localResult) {
-    if (localResult.applications && localResult.applications.length > 0) return; // never overwrite existing local data
-
-    chrome.storage.sync.get(null, function (syncResult) {
-      const meta = syncResult?.appliedin_sync_meta;
-      if (!meta || !meta.chunkCount) return;
-
-      let imported = [];
-      for (let i = 0; i < meta.chunkCount; i++) {
-        const chunk = syncResult['appliedin_sync_' + i] || [];
-        imported = imported.concat(chunk.map(c => ({
-          company: c.c, role: c.r, platform: c.p, date: c.d, status: c.s,
-          url: c.u || '', location: c.l || 'Unknown Location'
-        })));
-      }
-
-      if (imported.length > 0) {
-        chrome.storage.local.set({ applications: imported });
-        sendGAEvent('synced_from_other_device', { count: imported.length });
-      }
-    });
-  });
-}
-
 // Platform name detector from URL
 function detectPlatform(url) {
   try {
@@ -281,209 +69,6 @@ function detectPlatform(url) {
   }
 }
 
-// ── Universal manual capture ──
-// This is the real backup plan for pages the automatic detection never
-// even watches (URL has no job-related keyword), or where the page is
-// structurally unreadable (canvas UI, image-based confirmation, opaque
-// iframe). It works on literally ANY page, completely independent of the
-// job-keyword gate below — triggered by right-click or a keyboard shortcut,
-// never by automatic detection.
-
-chrome.runtime.onInstalled.addListener(function () {
-  chrome.contextMenus.create({
-    id: 'appliedin-manual-log',
-    title: '📋 Log this application with AppliedIn',
-    contexts: ['page', 'selection', 'link']
-  });
-});
-
-chrome.contextMenus.onClicked.addListener(function (info, tab) {
-  if (info.menuItemId === 'appliedin-manual-log' && tab?.id) {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: injectManualCapture
-    }).catch((err) => {
-      console.log('[AppliedIn] manual capture injection failed:', err);
-    });
-  }
-});
-
-chrome.commands.onCommand.addListener(function (command) {
-  if (command !== 'log-application') return;
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    const tab = tabs[0];
-    if (!tab?.id) return;
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: injectManualCapture
-    }).catch((err) => {
-      console.log('[AppliedIn] manual capture injection failed:', err);
-    });
-  });
-});
-
-// Self-contained (MV3 injected functions can't reference outside scope) —
-// does a lightweight best-effort read of the current page, then always
-// shows an editable popup so the person can confirm or correct before
-// saving. Deliberately simpler than the full detection pipeline, since
-// this is a manual trigger — the person already knows they want to log
-// something, we're just saving them from typing everything from scratch.
-function injectManualCapture() {
-  if (document.getElementById('appliedin-confirm')) return; // already open
-
-  function guessCompany() {
-    const meta =
-      document.querySelector('meta[property="og:site_name"]')?.content?.trim() ||
-      document.querySelector('meta[name="author"]')?.content?.trim();
-    if (meta) return meta;
-
-    try {
-      const parts = new URL(window.location.href).hostname.split('.').filter(Boolean);
-      const generic = ['www', 'account', 'accounts', 'apply', 'jobs', 'careers', 'career', 'portal', 'my', 'app'];
-      while (parts.length > 1 && generic.includes(parts[0].toLowerCase())) parts.shift();
-      const candidate = parts[0];
-      if (candidate && !generic.includes(candidate.toLowerCase())) {
-        return candidate.charAt(0).toUpperCase() + candidate.slice(1);
-      }
-    } catch (e) { /* ignore */ }
-    return '';
-  }
-
-  function guessRole() {
-    const ogTitle = document.querySelector('meta[property="og:title"]')?.content?.trim();
-    if (ogTitle && ogTitle.length <= 100) return ogTitle;
-    return '';
-  }
-
-  const overlay = document.createElement('div');
-  overlay.id = 'appliedin-overlay';
-  overlay.style.cssText = `
-    position: fixed; top:0; left:0; right:0; bottom:0;
-    background: rgba(0,0,0,0.45); z-index: 999998;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  `;
-
-  const popup = document.createElement('div');
-  popup.id = 'appliedin-confirm';
-  popup.style.cssText = `
-    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 420px; max-width: 90vw; background: white; border-radius: 16px;
-    padding: 28px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); z-index: 999999;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    border: 1px solid #e5e7eb;
-  `;
-
-  const guessedCompany = guessCompany();
-  const guessedRole = guessRole();
-
-  popup.innerHTML = `
-    <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:6px;">
-      📋 Log this application
-    </div>
-    <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.4;">
-      Add the company and role — we'll save it to your AppliedIn list.
-    </div>
-    <div style="margin-bottom:20px;">
-      <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
-      <input id="appliedin-company" value="${guessedCompany.replace(/"/g, '&quot;')}"
-        placeholder="${guessedCompany ? 'Company name' : "Type the company name"}"
-        style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e5e7eb;
-        border-radius:8px;font-size:14px;margin-bottom:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
-      <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
-      <input id="appliedin-role" value="${guessedRole.replace(/"/g, '&quot;')}"
-        placeholder="${guessedRole ? 'Job role' : "Type the job role"}"
-        style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e5e7eb;
-        border-radius:8px;font-size:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
-    </div>
-    <div style="display:flex;gap:10px;">
-      <button id="appliedin-yes" style="flex:1;padding:12px;background:#22c55e;color:white;
-        border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">✅ Save</button>
-      <button id="appliedin-no" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;
-        border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">❌ Cancel</button>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-  document.body.appendChild(popup);
-  document.getElementById('appliedin-company').focus();
-
-  document.getElementById('appliedin-yes').addEventListener('click', function () {
-    const company = document.getElementById('appliedin-company').value.trim();
-    const role = document.getElementById('appliedin-role').value.trim();
-
-    if (!company || !role) {
-      alert('Please enter both company and role.');
-      return;
-    }
-
-    const jobData = {
-      company,
-      role,
-      location: 'Unknown Location',
-      platform: 'Manual',
-      url: window.location.href,
-      date: new Date().toISOString(),
-      status: 'Applied'
-    };
-
-    chrome.storage.local.get(['applications'], function (result) {
-      const applications = result.applications || [];
-      applications.unshift(jobData);
-      chrome.storage.local.set({ applications }, function () {
-        chrome.runtime.sendMessage({ type: 'appliedin_saved', platform: 'Manual', method: 'manual_entry' }).catch(() => {});
-        overlay.remove();
-        popup.remove();
-      });
-    });
-  });
-
-  document.getElementById('appliedin-no').addEventListener('click', function () {
-    overlay.remove();
-    popup.remove();
-  });
-}
-
-// ── Persistent badge state ──
-// A 3-second toast is easy to miss entirely if you're not looking at that
-// exact moment. This badge on the extension icon is persistent instead —
-// it stays until the page changes, so checking it any time after applying
-// gives a definitive answer, not just a moment you might have missed.
-//
-//   (no badge)  — not watching this page at all
-//   "●" (blue)  — watching, nothing saved yet
-//   "✓" (green) — saved for this page
-function setBadgeState(tabId, state) {
-  if (state === 'watching') {
-    chrome.action.setBadgeText({ tabId, text: '●' });
-    chrome.action.setBadgeBackgroundColor({ tabId, color: '#6366f1' });
-    chrome.action.setTitle({ tabId, title: 'AppliedIn — watching this page for a submission' });
-  } else if (state === 'saved') {
-    chrome.action.setBadgeText({ tabId, text: '✓' });
-    chrome.action.setBadgeBackgroundColor({ tabId, color: '#22c55e' });
-    chrome.action.setTitle({ tabId, title: 'AppliedIn — saved for this page ✓' });
-  } else {
-    chrome.action.setBadgeText({ tabId, text: '' });
-    chrome.action.setTitle({ tabId, title: "AppliedIn — not watching this page. Right-click and choose \"Log this application\" if you applied here." });
-  }
-}
-
-// Content scripts / injected functions message here the moment they
-// successfully save, so the badge can flip to "saved" immediately —
-// far more reliable than hoping someone catches a 3-second toast.
-chrome.runtime.onMessage.addListener(function (message, sender) {
-  if (message?.type === 'appliedin_saved') {
-    if (sender?.tab?.id) {
-      setBadgeState(sender.tab.id, 'saved');
-    }
-    sendGAEvent('application_saved', {
-      platform: message.platform || 'Unknown',
-      method: message.method || 'auto'
-    });
-  } else if (message?.type === 'appliedin_popup_opened') {
-    sendGAEvent('popup_opened', {});
-  }
-});
-
 // Watch all tabs for URL changes
 chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   if (changeInfo.status !== 'complete') return;
@@ -497,10 +82,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     url.startsWith('chrome-extension://') ||
     url.startsWith('about:') ||
     url.startsWith('edge://')
-  ) {
-    setBadgeState(tabId, 'idle');
-    return;
-  }
+  ) return;
 
   // Skip already covered portals — they handle themselves
   const coveredPortals = [
@@ -514,95 +96,27 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   ];
 
   const isCovered = coveredPortals.some(portal => url.includes(portal));
-  if (isCovered) {
-    // Dedicated content scripts handle these — still show "watching" so
-    // the person gets the same at-a-glance confirmation everywhere.
-    setBadgeState(tabId, 'watching');
-    return;
-  }
+  if (isCovered) return;
 
   // Check if this looks like a job related page
   const jobKeywords = [
-    // Generic job/career wording
     'career', 'careers', 'jobs', 'job', 'apply',
     'application', 'hiring', 'vacancy', 'vacancies',
-    'opening', 'openings', 'recruitment', 'recruit', 'recruiting',
-    'work-with-us', 'join-us', 'join-our-team', 'joinus',
-    'opportunities', 'employment', 'positions', 'roles',
-    'talent', 'staffing', 'hire', 'hire-us',
-    'thankyou', 'thank-you', 'thank_you', 'confirmation',
-    // Global ATS platforms
-    'workday', 'greenhouse', 'lever', 'taleo', 'icims',
-    'smartrecruiters', 'workable', 'jobvite', 'ashbyhq',
-    'breezy', 'recruitee', 'personio', 'bamboohr',
-    // ATS/HR platforms common in India
-    'zohorecruit', 'freshteam', 'keka', 'darwinbox', 'peoplestrong'
+    'opening', 'openings', 'recruitment', 'work-with-us',
+    'join-us', 'join-our-team', 'opportunities', 'workday',
+    'greenhouse', 'lever', 'taleo', 'icims', 'smartrecruiters'
   ];
 
-  // Hard exclusions — these should NEVER be watched, regardless of any
-  // URL/title keyword match. Once the tracker is mistakenly injected into
-  // a single-page app like Gmail, it keeps running for that tab's entire
-  // lifetime (these apps never do a full page reload), continuously
-  // scanning their own UI — which is exactly what caused a "Company name:
-  // Mail" popup to appear while just checking email.
-  const excludedDomains = [
-    'mail.google.com', 'outlook.live.com', 'outlook.office.com', 'outlook.office365.com',
-    'mail.yahoo.com', 'calendar.google.com', 'drive.google.com',
-    'docs.google.com/document', 'docs.google.com/spreadsheets', 'docs.google.com/presentation',
-    'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'youtube.com',
-    'netflix.com', 'whatsapp.com', 'web.whatsapp.com', 'claude.ai', 'chatgpt.com'
-  ];
-  const isExcludedDomain = excludedDomains.some(d => url.includes(d));
-
-  // Google Forms is a common way companies (especially for off-campus
-  // hiring in India) collect applications, but its URLs are auto-generated
-  // IDs like docs.google.com/forms/d/e/1FAIpQLS.../viewform — they never
-  // contain any job-related keyword, so they need an explicit check.
-  // Chat/messaging pages legitimately contain application-related phrases
-  // in normal conversation (a recruiter writing "we received your
-  // application") — never a real submission confirmation. Exclude these
-  // regardless of whether the URL also happens to contain a job keyword.
-  const excludedPathPatterns = ['/chat/', '/message', '/inbox', '/conversation'];
-  const isExcludedPage = isExcludedDomain || excludedPathPatterns.some(p => url.includes(p));
-
-  const isGoogleForm = url.includes('docs.google.com/forms/');
-  const title = (tab.title || '').toLowerCase();
-
-  // Also check the tab title — free (no extra injection), and catches
-  // career pages whose URL structure doesn't obviously say "career" or
-  // "job" (e.g. a company's own custom-branded ATS with a generic-looking
-  // URL) but whose page title does, like "Careers at Honeywell".
-  const isJobPage = !isExcludedPage && (
-    isGoogleForm ||
-    jobKeywords.some(keyword => url.includes(keyword)) ||
-    jobKeywords.some(keyword => title.includes(keyword))
-  );
-
-  if (isGoogleForm && !isExcludedPage) {
-    console.log('[AppliedIn] Google Form detected, injecting tracker:', url);
-  } else if (isJobPage) {
-    console.log('[AppliedIn] Job page matched, injecting tracker:', url, '| title:', tab.title);
-  } else {
-    console.log('[AppliedIn] Not matched as job page, skipping:', url, '| title:', tab.title);
-  }
-
-  if (!isJobPage) {
-    setBadgeState(tabId, 'idle');
-    return;
-  }
-
-  setBadgeState(tabId, 'watching');
+  const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
+  if (!isJobPage) return;
 
   // Inject universal tracker into this page
-  // allFrames: true so an embedded Google Form (or other iframe-based
-  // application widget) inside a company's careers page gets covered too —
-  // the top-level tab URL alone wouldn't reveal what's embedded in it.
   chrome.scripting.executeScript({
-    target: { tabId: tabId, allFrames: true },
+    target: { tabId: tabId },
     func: injectUniversalTracker,
     args: [detectPlatform(tab.url)]
-  }).catch((err) => {
-    console.log('[AppliedIn] injection failed:', err);
+  }).catch(() => {
+    // Silently fail if page doesn't allow injection
   });
 });
 
@@ -612,41 +126,18 @@ function injectUniversalTracker(platformName) {
   if (window.__appliedinInjected) return;
   window.__appliedinInjected = true;
 
-  console.log('[AppliedIn] universal tracker loaded on', window.location.href, '(platform:', platformName + ')');
-
-  let lastHandledUrl = null;
-  let lastHandledAt = 0;
-  const REARM_COOLDOWN_MS = 8000;
-
-  // Many SPA-style career portals (Workday in particular) mutate the URL's
-  // query string or hash on internal navigation without a real page
-  // reload — comparing the raw href would treat every such tweak as "a
-  // different page," repeatedly re-arming detection on what is actually
-  // the same screen. Comparing origin+pathname only is far more stable.
-  function normalizedUrl() {
-    return window.location.origin + window.location.pathname;
+  // Guard: popup already open — don't interrupt user typing
+  function isPopupOpen() {
+    return !!document.getElementById('appliedin-confirm');
   }
 
-  // Blocks immediate re-triggers for the SAME event (multiple detection
-  // methods firing within moments of each other), while still allowing a
-  // genuinely NEW, later application on the same page — e.g. a
-  // "Recommended jobs for you" widget where someone applies to a second
-  // job shortly after the first — to be caught once the cooldown passes.
-  function isRecentlyHandled() {
-    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
-  }
+  // FIX BUG 2: Use a Set to track ALL handled URLs, not just the last one.
+  // Previously lastHandledUrl only stored ONE url, so after user dismissed
+  // the popup by clicking No/close, it was still that same URL and the observer
+  // kept re-triggering. Now once a URL is handled (popup shown OR saved),
+  // it NEVER shows again in this tab session.
+  const handledUrls = new Set();
 
-  function markHandled() {
-    lastHandledUrl = normalizedUrl();
-    lastHandledAt = Date.now();
-  }
-
-  // Only genuinely FINAL submit labels trigger a completion check.
-  // Words like "Apply"/"Register"/"Confirm"/"Done"/"Proceed" are too
-  // ambiguous — they're usually the button that just STARTS the flow,
-  // not the one that finishes it, so they're deliberately excluded here.
-  // The MutationObserver (Method 2 below) remains the real safety net —
-  // it only fires once genuine confirmation text actually appears.
   const submitTexts = [
     'submit application',
     'submit your application',
@@ -660,7 +151,7 @@ function injectUniversalTracker(platformName) {
     'complete registration'
   ];
 
-  // Success confirmation phrases
+  // Success confirmation phrases — includes Google Forms specific phrases
   const successPhrases = [
     'application submitted',
     'application received',
@@ -682,359 +173,72 @@ function injectUniversalTracker(platformName) {
     'participation confirmed',
     'you have registered',
     'application confirmation',
-    // Broader fragments to catch phrasing like "your application has been
-    // submitted" / "your resume has been received" that the more rigid
-    // two-word phrases above miss.
-    'has been submitted',
-    'has been received',
-    'has been sent',
-    'successfully received',
-    // Google Forms' standard confirmation text
-    'your response has been recorded'
+    // Google Forms specific
+    'your response has been recorded',
+    'your response has been submitted',
+    'thanks for submitting',
+    'form submitted',
+    'response recorded'
   ];
 
-  // URL patterns that strongly indicate a completed application —
-  // most ATS platforms (Workday, Greenhouse, Oracle-based systems, etc.)
-  // navigate to a URL like this after a real, final submission.
-  const successUrlPatterns = [
-    'thankyou', 'thank-you', 'thank_you', 'applythankyou',
-    'application-submitted', 'applysuccess', 'apply-success',
-    'applicationsuccess', 'confirmation', 'applied=1',
-    'status=success', 'status=offline-success', 'submitted=true',
-    // Google Forms' own URL convention after a real submission — very
-    // reliable, since Google controls this format consistently.
-    'formresponse'
+  // FIX BUG 1: Domains where we KNOW the detected company will be wrong.
+  // These are form/survey hosts, not the actual company.
+  // For these we skip auto-save and ALWAYS show the confirm popup so the
+  // user can type the real company name.
+  const ambiguousDomains = [
+    'docs.google.com',
+    'forms.google.com',
+    'forms.gle',
+    'typeform.com',
+    'jotform.com',
+    'surveymonkey.com',
+    'airtable.com',
+    'notion.so',
+    'zohorecruit.com',
+    'zoho.com',
+    'freshteam.com',
+    'keka.com',
+    'darwinbox.com',
+    'greythr.com',
+    'bamboohr.com',
+    'forms.microsoft.com',
+    'office.com',
   ];
 
-  function urlLooksLikeSuccess() {
-    return successUrlPatterns.some(p => window.location.href.toLowerCase().includes(p));
-  }
-
-  function titleLooksLikeSuccess() {
-    const title = (document.title || '').toLowerCase();
-    return successPhrases.some(phrase => title.includes(phrase)) ||
-      title.includes('thank you');
-  }
-
-  function bodyLooksLikeSuccess() {
-    const bodyText = document.body.innerText || '';
-    return successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
-  }
-
-  // Words that indicate a FAILED submission (validation error, etc.) —
-  // if any of these are present, don't treat structural changes as success.
-  const errorIndicators = [
-    'required field', 'is required', 'please fill', 'please enter',
-    'invalid', 'error occurred', 'something went wrong', 'failed to',
-    'try again', 'please correct', 'field is empty'
-  ];
-
-  function pageLooksLikeError() {
-    const bodyText = (document.body.innerText || '').toLowerCase();
-    return errorIndicators.some(phrase => bodyText.includes(phrase));
-  }
-
-  // Structural, language-independent success signal: an element whose
-  // class or id names sound like a success/confirmation box. Developers
-  // use these naming conventions constantly regardless of what the
-  // visible text actually says, so this catches wording we could never
-  // fully enumerate.
-  function hasGenericSuccessElement() {
-    const el = document.querySelector(
-      '[class*="success" i], [class*="thank-you" i], [class*="thankyou" i], ' +
-      '[class*="confirmation" i], [id*="success" i], [id*="thank-you" i], ' +
-      '[id*="confirmation" i], [class*="submitted" i]'
-    );
-    if (!el) return false;
-    const style = window.getComputedStyle(el);
-    return style.display !== 'none' && style.visibility !== 'hidden';
-  }
-
-  // Structural signal #2: the form the user just submitted has vanished
-  // from the page — a near-universal pattern after a real submission,
-  // regardless of what confirmation text (if any) replaces it.
-  function formDisappeared(formRef) {
-    if (!formRef) return false;
-    if (!document.body.contains(formRef)) return true;
-    const style = window.getComputedStyle(formRef);
-    return style.display === 'none' || style.visibility === 'hidden';
-  }
-
-  function handleDetectedSuccess() {
-    if (isRecentlyHandled()) return;
-    markHandled();
-
-    const jobData = getPageDetails();
-    if (jobData && jobData.confident) {
-      saveApplication(jobData);
-    } else if (jobData) {
-      showConfirmPopup();
-    }
-  }
-
-  // Fallback for when no exact phrase/URL matched, but the page structure
-  // still strongly suggests a real submission happened. Always shows the
-  // popup here rather than auto-saving — this signal is weaker than an
-  // exact phrase match, so we ask rather than guess silently.
-  function handlePossibleSuccess(formRef) {
-    if (isRecentlyHandled()) return true;
-    if (pageLooksLikeError()) return false;
-    if (!hasGenericSuccessElement() && !formDisappeared(formRef)) return false;
-
-    markHandled();
-    const jobData = getPageDetails();
-    if (jobData) showConfirmPopup();
-    return true;
-  }
-
-  // Last resort: we saw a submit-like click, but NOTHING — not exact
-  // phrase, not URL, not structural signal — gave us any confidence
-  // about what happened. Rather than silently doing nothing (which
-  // leaves the person unknowingly relying on a save that never
-  // happened), show a small, low-friction nudge they can act on or
-  // ignore, instead of a full popup demanding an answer.
-  function showSoftNudge() {
-    if (document.getElementById('appliedin-nudge')) return;
-
-    const overlay = document.createElement('div');
-    overlay.id = 'appliedin-nudge-overlay';
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.4);
-      z-index: 999996;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    `;
-
-    const nudge = document.createElement('div');
-    nudge.id = 'appliedin-nudge';
-    nudge.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 360px;
-      max-width: 90vw;
-      background: white;
-      border-radius: 16px;
-      padding: 26px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      z-index: 999997;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      border: 1px solid #e5e7eb;
-      text-align: center;
-    `;
-    nudge.innerHTML = `
-      <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">
-        📋 AppliedIn
-      </div>
-      <div style="font-size:15px;color:#4b5563;margin-bottom:22px;line-height:1.5;">
-        Did you just submit an application?<br>We couldn't confirm it automatically.
-      </div>
-      <div style="display:flex;gap:10px;">
-        <button id="appliedin-nudge-log" style="flex:1;padding:12px;background:#4f46e5;color:white;
-          border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
-          Yes, log it
-        </button>
-        <button id="appliedin-nudge-dismiss" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;
-          border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
-          No, dismiss
-        </button>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    document.body.appendChild(nudge);
-
-    document.getElementById('appliedin-nudge-log').addEventListener('click', function () {
-      overlay.remove();
-      nudge.remove();
-      showConfirmPopup();
-    });
-
-    document.getElementById('appliedin-nudge-dismiss').addEventListener('click', function () {
-      overlay.remove();
-      nudge.remove();
-    });
-  }
-
-  // METHOD 0 — Page already loaded directly on a confirmation page.
-  // Deliberately checking URL/title ONLY here, not body text — a page
-  // like an "Applications" dashboard permanently displays status text
-  // such as "Application submitted" for applications from days ago, and
-  // trusting body text on load alone would re-trigger every single time
-  // that page is revisited. URL and tab title are reliable because they
-  // specifically indicate a fresh post-submission redirect, not just a
-  // page someone is casually browsing back to.
-  if (urlLooksLikeSuccess() || titleLooksLikeSuccess()) {
-    setTimeout(handleDetectedSuccess, 500);
-  }
-
-  // Generic subdomain labels that are never the actual company name —
-  // strip these from the front of the hostname before guessing.
-  const GENERIC_SUBDOMAINS = [
-    'www', 'account', 'accounts', 'apply', 'jobs', 'careers', 'career',
-    'portal', 'my', 'app', 'id', 'signin', 'login', 'auth', 'recruiting',
-    'recruit', 'talent', 'hire', 'hiring', 'candidate', 'candidates'
-  ];
-
-  // Generic headings that are UI chrome, not a job title — never trust
-  // these as the role even if they're in an <h1>/<h2>.
-  const GENERIC_HEADINGS = [
-    'apply', 'submit', 'continue', 'home', 'login', 'sign in', 'sign up',
-    'welcome', 'my progress', 'applications', 'profile', 'dashboard',
-    'search', 'get started', 'next', 'back', 'save'
-  ];
-
-  // The exact-match blacklist above only catches literal matches like
-  // "Welcome" on its own — it misses "Welcome, Mohith Kintali (Mohith...)"
-  // since that text is never an exact match against anything. This catches
-  // greeting banners and other page chrome by pattern instead.
-  function looksLikeGreetingOrChrome(text) {
-    if (!text) return true;
-    const lower = text.toLowerCase().trim();
-    if (GENERIC_HEADINGS.includes(lower)) return true;
-    if (/^welcome\b/.test(lower)) return true;
-    if (/^(hi|hello|hey)\b/.test(lower)) return true;
-    if (/^you have\b/.test(lower)) return true;
-    if (/^my (applications|progress|profile|account)\b/.test(lower)) return true;
-    // Transient loading-state text ("Applying for...", "Submitting...")
-    // occasionally gets grabbed mid-animation, before the real content
-    // has rendered.
-    if (/^(applying for|apply for|submitting|please wait|loading|processing)\b/.test(lower)) return true;
-    // Job titles are essentially never this long — a paragraph or
-    // greeting banner accidentally grabbed by an h1/h2 selector usually is
-    if (text.length > 80) return true;
-    return false;
-  }
-
-  // Hosts that are form/survey PLATFORMS, not companies — guessing a
-  // company name from these hostnames would produce nonsense like
-  // "Docs" or "Forms". These generic form builders never tell us who
-  // the actual employer is, so we deliberately leave company unknown
-  // and let the popup ask instead of guessing wrong.
-  const FORM_PLATFORM_HOSTS = [
-    'docs.google.com', 'forms.gle', 'forms.office.com',
-    'typeform.com', 'jotform.com', 'airtable.com'
-  ];
-
-  function guessCompanyFromHostname() {
-    const hostname = new URL(window.location.href).hostname;
-    if (FORM_PLATFORM_HOSTS.some(h => hostname.includes(h))) return null;
-
-    const parts = hostname
-      .split('.')
-      .filter(Boolean);
-
-    // Drop generic labels from the front (e.g. "account.amazon.jobs" -> "amazon.jobs")
-    while (parts.length > 1 && GENERIC_SUBDOMAINS.includes(parts[0].toLowerCase())) {
-      parts.shift();
-    }
-
-    const candidate = parts[0] || '';
-    if (!candidate || GENERIC_SUBDOMAINS.includes(candidate.toLowerCase())) return null;
-    return candidate.charAt(0).toUpperCase() + candidate.slice(1);
-  }
-
-  // Many job sites embed JobPosting structured data (schema.org) inside
-  // a <script type="application/ld+json"> tag, specifically so Google's
-  // job search can index them. This is far more reliable than guessing
-  // from CSS classes or hostnames — when present, treat it as ground truth.
-  function getStructuredJobData() {
-    try {
-      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-      for (const script of scripts) {
-        let data;
-        try {
-          data = JSON.parse(script.textContent);
-        } catch (e) {
-          continue;
-        }
-
-        const items = Array.isArray(data) ? data : (data['@graph'] || [data]);
-
-        for (const item of items) {
-          if (!item) continue;
-          const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
-          if (!types.includes('JobPosting')) continue;
-
-          const title = item.title || null;
-
-          const org = item.hiringOrganization;
-          const company = (org && (org.name || (typeof org === 'string' ? org : null))) || null;
-
-          let location = null;
-          const loc = item.jobLocation;
-          const locEntry = Array.isArray(loc) ? loc[0] : loc;
-          const address = locEntry && locEntry.address;
-          if (address) {
-            location = [address.addressLocality, address.addressRegion, address.addressCountry]
-              .filter(Boolean).join(', ');
-          }
-
-          if (title || company) {
-            return { title, company, location: location || null };
-          }
-        }
-      }
-    } catch (e) {
-      // best-effort enhancement, not critical path
-    }
-    return null;
+  function isAmbiguousDomain() {
+    const hostname = window.location.hostname.toLowerCase();
+    return ambiguousDomains.some(d => hostname.includes(d));
   }
 
   function getPageDetails() {
     try {
-      const structured = getStructuredJobData();
+      const title =
+        document.querySelector('h1')?.innerText?.trim() ||
+        document.querySelector('h2')?.innerText?.trim() ||
+        document.title?.trim() ||
+        'Unknown Role';
 
-      const metaCompany =
-        structured?.company ||
-        document.querySelector('meta[property="og:site_name"]')?.content?.trim() ||
-        document.querySelector('meta[name="author"]')?.content?.trim() ||
-        null;
+      const companyMeta =
+        document.querySelector('meta[property="og:site_name"]')?.content ||
+        document.querySelector('meta[name="author"]')?.content ||
+        '';
 
-      const hostnameCompany = guessCompanyFromHostname();
-      const company = metaCompany || hostnameCompany || null;
-
-      // Strong sources: structured JobPosting data and og:title metadata
-      // are specifically authored to describe THIS job — reliable enough
-      // to auto-save from.
-      const strongTitle =
-        structured?.title ||
-        document.querySelector('meta[property="og:title"]')?.content?.trim() ||
-        null;
-
-      // Weak sources: generic page headings. These have repeatedly turned
-      // out to grab the wrong thing (greeting banners, dashboard titles,
-      // "Apply" buttons) — still worth trying, but never confident, and
-      // filtered through the greeting/chrome detector first.
-      const weakTitleCandidates = [
-        document.querySelector('h1')?.innerText?.trim(),
-        document.querySelector('h2')?.innerText?.trim(),
-        document.title?.trim()
-      ];
-      const weakTitle = weakTitleCandidates.find(t =>
-        t && t.length > 3 && !looksLikeGreetingOrChrome(t)
-      ) || null;
-
-      const role = strongTitle || weakTitle || null;
-
-      // "Confident" means we're comfortable auto-saving without asking.
-      // Structured JobPosting data is trustworthy on its own; otherwise
-      // require a real (non-guessed) company AND a strong title source —
-      // a weak/guessed title is never enough to auto-save on its own.
-      const confident =
-        (!!structured?.company && !!structured?.title) ||
-        (!!metaCompany && !!strongTitle);
+      const company = companyMeta ||
+        new URL(window.location.href).hostname
+          .replace('www.', '')
+          .replace('careers.', '')
+          .replace('jobs.', '')
+          .split('.')[0] ||
+        'Unknown Company';
 
       return {
-        company: company || null,
-        role: role ? role.substring(0, 100) : null,
-        location: structured?.location || 'Unknown Location',
+        company: company.charAt(0).toUpperCase() + company.slice(1),
+        role: title.substring(0, 100),
+        location: 'Unknown Location',
         platform: platformName,
         url: window.location.href,
         date: new Date().toISOString(),
-        status: 'Applied',
-        confident
+        status: 'Applied'
       };
     } catch (e) {
       return null;
@@ -1045,108 +249,28 @@ function injectUniversalTracker(platformName) {
     chrome.storage.local.get(['applications'], function (result) {
       const applications = result.applications || [];
 
-      // A URL with no query string that ends in a generic confirmation
-      // path (post-apply, thank-you, success, etc.) is often IDENTICAL
-      // across every application on that site — using it as a dedup key
-      // would make every such application collide with any previous one.
-      function urlLooksGeneric(url) {
-        if (!url) return true;
-        try {
-          const u = new URL(url);
-          if (u.search) return false; // has query params — likely job-specific
-          return /post-apply|thank-?you|\/success\/?$|\/confirmation\/?$|\/applied\/?$/i.test(u.pathname);
-        } catch (e) {
-          return false;
-        }
-      }
-
-      // Detects role text that's clearly page-chrome or a mis-detection
-      // rather than a real, distinct job title. Used ONLY to decide
-      // whether a same-company, close-in-time entry is likely the SAME
-      // submission caught twice by different detection paths — NOT as a
-      // general "these are probably the same job" signal, since applying
-      // to two different roles at the same company in quick succession
-      // is a completely normal pattern that must NOT be blocked.
-      function roleLooksLikeMisdetection(role, company) {
-        if (!role) return true;
-        const lower = role.toLowerCase();
-        if (/thank\s*you/.test(lower)) return true;
-        if (/application (submitted|received|complete)/.test(lower)) return true;
-        if (company && lower === company.toLowerCase()) return true;
-        if (role.length < 4) return true;
-        return false;
-      }
-
-      const isDuplicate = applications.some(app => {
-        // Same exact job URL — definitely a duplicate, regardless of when.
-        // Excludes generic confirmation-page URLs, which are identical
-        // across every application on a site.
-        if (jobData.url && app.url && app.url === jobData.url && !urlLooksGeneric(jobData.url)) return true;
-
-        // Generic/placeholder text should NEVER count as a match basis —
-        // "Unknown Company" === "Unknown Company" would otherwise flag
-        // every undetected application as a duplicate of any other
-        // undetected one, even completely different jobs.
-        if (app.company === 'Unknown Company' || jobData.company === 'Unknown Company') {
-          return false;
-        }
-
-        const sameCompany = app.company.toLowerCase() === jobData.company.toLowerCase();
-        const withinTightWindow = (new Date() - new Date(app.date)) < 5 * 60 * 1000;
-        const withinDay = (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000;
-
-        // Same company + IDENTICAL role within 24 hours — a real repeat.
-        if (sameCompany && app.role && jobData.role &&
-            app.role.toLowerCase() === jobData.role.toLowerCase() && withinDay) {
-          return true;
-        }
-
-        // Same company, close in time, AND one of the two role texts
-        // looks like a mis-detection (not a real distinct job title) —
-        // deliberately NOT triggered just by "same company, close in
-        // time" alone, since that would wrongly block legitimate
-        // back-to-back applications to different roles at the same
-        // employer.
-        if (sameCompany && withinTightWindow &&
-            (roleLooksLikeMisdetection(app.role, app.company) || roleLooksLikeMisdetection(jobData.role, jobData.company))) {
-          return true;
-        }
-
-        return false;
-      });
+      const isDuplicate = applications.some(app =>
+        app.company.toLowerCase() === jobData.company.toLowerCase() &&
+        app.role.toLowerCase() === jobData.role.toLowerCase() &&
+        (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
+      );
 
       if (isDuplicate) {
         showToast('⚠️ Already applied here recently!', '#f59e0b');
-        chrome.runtime.sendMessage({
-          type: 'appliedin_saved',
-          platform: jobData.platform,
-          method: jobData.confident ? 'auto' : 'popup_confirm'
-        }).catch(() => {});
         return;
       }
 
       applications.unshift(jobData);
       chrome.storage.local.set({ applications }, function () {
         showToast('✅ Application saved — ' + jobData.company, '#22c55e');
-        chrome.runtime.sendMessage({
-          type: 'appliedin_saved',
-          platform: jobData.platform,
-          method: jobData.confident ? 'auto' : 'popup_confirm'
-        }).catch(() => {});
       });
     });
   }
 
-  // METHOD 1 — Fast path: if a submit-like click is immediately followed
-  // by real confirmation text, save right away without waiting for the
-  // MutationObserver. If confirmation ISN'T found, we do nothing here —
-  // deliberately no popup fallback in this handler, because many
-  // multi-section forms (e.g. Amazon Jobs) have their own per-section
-  // "Submit" buttons that aren't the final application submission.
-  // Method 2 below is the real authority: it only acts once genuine
-  // success text actually appears anywhere on the page.
+  // METHOD 1 — Detect submit button click
   document.addEventListener('click', function (e) {
-    if (isRecentlyHandled()) return;
+    // FIX BUG 2: check the Set, not a single variable
+    if (handledUrls.has(window.location.href)) return;
 
     const element = e.target.closest('button, input[type="submit"], input[type="button"], a');
     if (!element) return;
@@ -1162,131 +286,74 @@ function injectUniversalTracker(platformName) {
     const isSubmitButton = submitTexts.some(t => text === t || text.includes(t));
     if (!isSubmitButton) return;
 
-    // Capture the form now, before anything changes — used as a
-    // language-independent fallback signal if no phrase/URL matches.
-    const formRef = element.closest('form');
-
-    // Snapshot whether success signals are ALREADY present before this
-    // click — if a confirmation banner is stale leftover DOM (e.g. from
-    // testing the same form a second time), it would already be true
-    // here, and we must not mistake it for something THIS click caused.
-    const alreadyConfirmedBeforeClick = urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess();
-
     setTimeout(() => {
-      if (isRecentlyHandled()) return;
+      if (handledUrls.has(window.location.href)) return;
+      if (isPopupOpen()) return; // user already filling popup
 
-      const confirmedNow = urlLooksLikeSuccess() || titleLooksLikeSuccess() || bodyLooksLikeSuccess();
+      const bodyText = document.body.innerText || '';
+      const isConfirmed = successPhrases.some(phrase =>
+        bodyText.toLowerCase().includes(phrase)
+      );
 
-      if (confirmedNow && !alreadyConfirmedBeforeClick) {
-        // Genuinely NEW confirmation, caused by this click.
-        handleDetectedSuccess();
-        return;
-      }
+      if (isConfirmed) {
+        handledUrls.add(window.location.href); // FIX BUG 2: mark as handled
 
-      // No exact phrase/URL matched — fall back to structural signals
-      // (form gone, or a success-styled element appeared) rather than
-      // going completely silent. Always asks via popup here, never
-      // auto-saves, since this signal is weaker than an exact match.
-      const handled = handlePossibleSuccess(formRef);
-
-      if (!handled) {
-        // Nothing gave us any confidence at all. Rather than silently
-        // doing nothing, surface a small dismissible nudge so the person
-        // knows to check — instead of unknowingly assuming it saved.
-        showSoftNudge();
-      }
-    }, 2500);
-  });
-
-  // METHOD 1B — Some sites (e.g. Shine.com) have a single "Apply" button
-  // that, on click, simply relabels itself to "Applied" — no new banner,
-  // no confirmation text anywhere else on the page. "Apply" alone is
-  // deliberately excluded from submitTexts above (too ambiguous — it's
-  // usually a START action, not completion), so this needs its own,
-  // narrowly-scoped check: only watches whether THIS SPECIFIC element's
-  // own label flips to a "done" state, not the whole page. That scoping
-  // is what makes it safe from the multi-section-form false-positive
-  // risk that ambiguous words like "Apply" would otherwise cause.
-  document.addEventListener('click', function (e) {
-    if (isRecentlyHandled()) return;
-
-    const element = e.target.closest('button, a');
-    if (!element) return;
-
-    const text = (element.innerText || '').toLowerCase().trim();
-    if (!text.includes('apply')) return;
-    if (submitTexts.some(t => text === t || text.includes(t))) return; // already handled above
-
-    const originalText = element.innerText;
-
-    setTimeout(() => {
-      if (isRecentlyHandled()) return;
-      if (!document.body.contains(element)) return;
-
-      const newText = (element.innerText || '').trim();
-      const flippedToApplied =
-        newText !== originalText &&
-        /\bapplied\b/i.test(newText) &&
-        !/\bapply\b/i.test(newText);
-
-      if (flippedToApplied) {
-        handleDetectedSuccess();
+        // FIX BUG 1: if ambiguous domain, always ask user even if success detected
+        if (isAmbiguousDomain()) {
+          const jobData = getPageDetails();
+          showConfirmPopup(jobData, true); // true = success already confirmed, just need company name
+        } else {
+          const jobData = getPageDetails();
+          if (jobData) saveApplication(jobData);
+        }
+      } else if (!handledUrls.has(window.location.href)) {
+        handledUrls.add(window.location.href); // FIX BUG 2: mark as handled
+        showConfirmPopup(null, false);
       }
     }, 2000);
   });
 
-  // Snapshot: was success text already present the moment this script
-  // loaded? If so, it's very likely a persistent status label (e.g. an
-  // "Applications" dashboard showing "Application submitted" for
-  // something from days ago) rather than a fresh confirmation — so we
-  // must only react to text that's genuinely NEW, not merely present.
-  let bodyAlreadyHadSuccessTextOnLoad = bodyLooksLikeSuccess();
-
-  // METHOD 2 — Watch DOM for genuine success confirmation message.
-  // This is the real authority for both auto-save and the popup fallback —
-  // it only fires once real confirmation text NEWLY appears, regardless
-  // of which button (if any) triggered it. Debounced so busy pages
-  // (ads, trackers, live-updating widgets) don't trigger a full-text
-  // rescan on every single incidental mutation.
-  let mutationDebounce = null;
+  // METHOD 2 — Watch DOM for success confirmation message
   const observer = new MutationObserver(function () {
-    clearTimeout(mutationDebounce);
-    mutationDebounce = setTimeout(() => {
-      if (isRecentlyHandled()) return;
+    // FIX BUG 2: check the Set
+    if (handledUrls.has(window.location.href)) return;
+    if (isPopupOpen()) return; // user typing — don't interrupt
 
-      const currentlyHasSuccessText = bodyLooksLikeSuccess();
-      const isNewTransition = currentlyHasSuccessText && !bodyAlreadyHadSuccessTextOnLoad;
+    const bodyText = document.body.innerText || '';
+    const isConfirmed = successPhrases.some(phrase =>
+      bodyText.toLowerCase().includes(phrase)
+    );
 
-      // Always sync the baseline FIRST, before any early return — this was
-      // the actual bug causing the infinite popup loop: the old code only
-      // updated the baseline on the non-triggering path, so after a real
-      // trigger it stayed permanently stuck at "false," making every
-      // subsequent unrelated mutation look like a fresh transition again.
-      bodyAlreadyHadSuccessTextOnLoad = currentlyHasSuccessText;
+    if (isConfirmed) {
+      handledUrls.add(window.location.href); // FIX BUG 2: mark as handled immediately
 
-      if (isNewTransition) {
-        setTimeout(handleDetectedSuccess, 1000);
-        return;
-      }
-
-      if (urlLooksLikeSuccess()) {
-        setTimeout(handleDetectedSuccess, 1000);
-      }
-    }, 400);
+      setTimeout(() => {
+        // FIX BUG 1: ambiguous domain → always show popup with empty company field
+        if (isAmbiguousDomain()) {
+          const jobData = getPageDetails();
+          showConfirmPopup(jobData, true);
+        } else {
+          const jobData = getPageDetails();
+          if (jobData) saveApplication(jobData);
+        }
+      }, 1000);
+    }
   });
 
+  // BUG 5 FIX (pre-emptive): remove characterData — not needed, just costs CPU
   observer.observe(document.body, {
     childList: true,
-    subtree: true,
-    characterData: true
+    subtree: true
+    // characterData removed — we only need node additions, not text changes
   });
 
-  // Confirmation popup — shown when auto detection is uncertain
-  function showConfirmPopup() {
+  // Confirmation popup
+  // FIX BUG 1: alreadyConfirmed = true means success was detected, we just
+  // need the user to fill in the correct company name (Google Forms case).
+  // alreadyConfirmed = false means we're uncertain, so we ask "did you apply?"
+  function showConfirmPopup(jobData, alreadyConfirmed) {
     const existing = document.getElementById('appliedin-confirm');
-    if (existing) existing.remove();
-
-    const jobData = getPageDetails();
+    if (existing) return; // popup already open, don't duplicate
 
     const overlay = document.createElement('div');
     overlay.id = 'appliedin-overlay';
@@ -1316,64 +383,59 @@ function injectUniversalTracker(platformName) {
       border: 1px solid #e5e7eb;
     `;
 
+    // FIX BUG 1: if ambiguous domain, company field starts EMPTY and is highlighted
+    // so user is forced to type the real company name. We show a clear message
+    // explaining why we can't auto-detect it.
+    const isAmbiguous = isAmbiguousDomain();
+    const companyValue = isAmbiguous ? '' : (jobData?.company || '');
+    const roleValue = isAmbiguous
+      ? (document.title?.replace(' - Google Forms', '').replace('Apply Now', '').trim() || '')
+      : (jobData?.role?.substring(0, 60) || '');
+
+    const questionText = alreadyConfirmed
+      ? '✅ Application submitted! <br><span style="font-size:13px;color:#6b7280;">Enter the company name to save it correctly.</span>'
+      : 'Did you complete this application?';
+
+    const companyHint = isAmbiguous
+      ? '<div style="font-size:11px;color:#ef4444;margin-top:4px;">⚠️ We can\'t auto-detect the company from this form. Please type it.</div>'
+      : '';
+
     popup.innerHTML = `
       <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:6px;">
         📋 AppliedIn
       </div>
-      <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.4;">
-        Did you complete this application?
+      <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.5;">
+        ${questionText}
       </div>
-      <style>
-        #appliedin-confirm input:focus {
-          border-color: #6366f1 !important;
-          box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
-        }
-        #appliedin-confirm input.appliedin-needs-input {
-          border-color: #f59e0b !important;
-          background: #fffbeb !important;
-        }
-        #appliedin-confirm input::placeholder {
-          color: #b45309;
-          font-style: italic;
-        }
-        #appliedin-confirm input:not(.appliedin-needs-input)::placeholder {
-          color: #9ca3af;
-          font-style: normal;
-        }
-      </style>
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
         <input id="appliedin-company"
-          value="${jobData?.company || ''}"
-          class="${jobData?.company ? '' : 'appliedin-needs-input'}"
-          placeholder="${jobData?.company ? 'Company name' : "Couldn't detect — click here and type it"}"
+          value="${companyValue}"
+          placeholder="e.g. Razorpay, Zomato, TCS..."
           style="width:100%;box-sizing:border-box;padding:10px 12px;
-          border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          margin-bottom:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
-        <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
+          border:2px solid ${isAmbiguous ? '#ef4444' : '#e5e7eb'};border-radius:8px;font-size:14px;
+          margin-bottom:4px;color:#111827;outline:none;" />
+        ${companyHint}
+        <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;margin-top:12px;">Job role</label>
         <input id="appliedin-role"
-          value="${jobData?.role?.substring(0, 60) || ''}"
-          class="${jobData?.role ? '' : 'appliedin-needs-input'}"
-          placeholder="${jobData?.role ? 'Job role' : "Couldn't detect — click here and type it"}"
+          value="${roleValue}"
+          placeholder="e.g. Software Engineer, Data Analyst..."
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
-        <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
-          ✏️ Both fields above are editable — click into either one to type or correct it.
-        </div>
+          color:#111827;outline:none;" />
       </div>
       <div style="display:flex;gap:10px;">
         <button id="appliedin-yes"
           style="flex:1;padding:12px;background:#22c55e;color:white;
           border:none;border-radius:8px;font-size:14px;
           font-weight:600;cursor:pointer;">
-          ✅ Yes, Save
+          ✅ Save Application
         </button>
         <button id="appliedin-no"
           style="flex:1;padding:12px;background:#f3f4f6;color:#374151;
           border:none;border-radius:8px;font-size:14px;
           font-weight:600;cursor:pointer;">
-          ❌ No
+          ❌ ${alreadyConfirmed ? 'Skip' : 'No'}
         </button>
       </div>
     `;
@@ -1381,15 +443,23 @@ function injectUniversalTracker(platformName) {
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
 
-    const firstNeedsInput = document.querySelector('#appliedin-confirm .appliedin-needs-input');
-    (firstNeedsInput || document.getElementById('appliedin-company'))?.focus();
+    // Auto-focus company field so user can type immediately
+    setTimeout(() => {
+      document.getElementById('appliedin-company')?.focus();
+    }, 100);
 
     document.getElementById('appliedin-yes').addEventListener('click', function () {
       const finalCompany = document.getElementById('appliedin-company').value.trim();
       const finalRole = document.getElementById('appliedin-role').value.trim();
 
-      if (!finalCompany || !finalRole) {
-        alert('Please enter company and role.');
+      if (!finalCompany) {
+        document.getElementById('appliedin-company').style.border = '2px solid #ef4444';
+        document.getElementById('appliedin-company').placeholder = 'Company name is required!';
+        return;
+      }
+      if (!finalRole) {
+        document.getElementById('appliedin-role').style.border = '2px solid #ef4444';
+        document.getElementById('appliedin-role').placeholder = 'Job role is required!';
         return;
       }
 
@@ -1405,16 +475,25 @@ function injectUniversalTracker(platformName) {
 
       overlay.remove();
       popup.remove();
+      // FIX BUG 2: mark as handled after user clicks Yes — won't re-appear
+      handledUrls.add(window.location.href);
       saveApplication(finalData);
     });
 
     document.getElementById('appliedin-no').addEventListener('click', function () {
       overlay.remove();
       popup.remove();
-      // This wasn't actually a completion — allow a later, genuine
-      // submission on this same page (common on multi-section forms
-      // like Amazon Jobs) to still be caught instead of going silent.
-      lastHandledUrl = null; lastHandledAt = 0;
+      // FIX BUG 2: mark as handled after No too — won't re-appear even if
+      // user dismissed it. They made a conscious choice.
+      handledUrls.add(window.location.href);
+    });
+
+    // Close on overlay click
+    overlay.addEventListener('click', function () {
+      overlay.remove();
+      popup.remove();
+      // FIX BUG 2: also mark handled on overlay dismiss
+      handledUrls.add(window.location.href);
     });
   }
 
@@ -1448,3 +527,45 @@ function injectUniversalTracker(platformName) {
     }, 3000);
   }
 }
+
+// ── FIX BUG 1: Message handler for content script → IndexedDB saves ──
+// Content scripts can't open the popup's IndexedDB directly.
+// They send a message here; background worker writes using chrome.storage.local
+// (the background acts as a relay — popup reads from IndexedDB, background
+// writes to chrome.storage.local as a temporary bridge until the popup
+// migrates everything to IndexedDB on next open).
+// In practice this means: content script saves go to chrome.storage.local,
+// popup migrates them to IndexedDB on next open. Zero data loss.
+
+chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+  if (message.type !== 'SAVE_APPLICATION') return false;
+
+  const jobData = message.data;
+  if (!jobData || !jobData.company || !jobData.role) {
+    sendResponse({ saved: false, error: 'missing fields' });
+    return true;
+  }
+
+  chrome.storage.local.get(['applications'], function (result) {
+    const applications = result.applications || [];
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+
+    const isDuplicate = applications.some(app =>
+      app.company.toLowerCase() === jobData.company.toLowerCase() &&
+      app.role.toLowerCase()    === jobData.role.toLowerCase()    &&
+      new Date(app.date).getTime() > cutoff
+    );
+
+    if (isDuplicate) {
+      sendResponse({ saved: false, duplicate: true });
+      return;
+    }
+
+    applications.unshift(jobData);
+    chrome.storage.local.set({ applications }, function () {
+      sendResponse({ saved: true });
+    });
+  });
+
+  return true; // keep message channel open for async response
+});

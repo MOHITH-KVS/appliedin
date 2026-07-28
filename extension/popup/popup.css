@@ -40,15 +40,6 @@ body {
   letter-spacing: -0.3px;
 }
 
-.app-version {
-  font-size: 10px;
-  font-weight: 600;
-  color: #9ca3af;
-  background: #f3f4f6;
-  padding: 2px 6px;
-  border-radius: 8px;
-}
-
 .total-count {
   font-size: 11px;
   font-weight: 500;
@@ -73,26 +64,6 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: background 0.15s;
-}
-
-.stat:hover {
-  background: #eef2ff;
-}
-
-.stat.active {
-  background: #6366f1;
-}
-
-.stat.active .stat-value {
-  color: #ffffff;
-}
-
-.stat.active .stat-label {
-  color: #e0e7ff;
 }
 
 .stat-value {
@@ -112,19 +83,6 @@ body {
   width: 1px;
   height: 28px;
   background: #e5e7eb;
-}
-
-/* Weekly Summary */
-.weekly-summary {
-  margin: 10px 16px 0;
-  padding: 10px 14px;
-  background: linear-gradient(135deg, #eef2ff, #f5f3ff);
-  border: 1px solid #e0e7ff;
-  border-radius: 10px;
-  font-size: 12px;
-  color: #4338ca;
-  line-height: 1.5;
-  font-weight: 500;
 }
 
 /* Search */
@@ -151,21 +109,6 @@ body {
 }
 
 /* Filter Tabs */
-.filter-tabs-wrap {
-  position: relative;
-}
-
-.filter-tabs-wrap::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 24px;
-  background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,0.95));
-  pointer-events: none;
-}
-
 .filter-tabs {
   display: flex;
   gap: 4px;
@@ -315,60 +258,6 @@ body {
 
 .btn-delete:hover { color: #ef4444; }
 
-.card-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.btn-edit {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  color: #d1d5db;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: color 0.15s;
-}
-
-.btn-edit:hover { color: #4f46e5; }
-
-.edit-form input {
-  width: 100%;
-  box-sizing: border-box;
-  font-size: 12px;
-  padding: 6px 8px;
-  border: 1.5px solid #e5e7eb;
-  border-radius: 6px;
-  margin-bottom: 6px;
-  color: #111827;
-  outline: none;
-}
-
-.edit-form input:focus {
-  border-color: #6366f1;
-}
-
-.edit-form-actions {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.btn-edit-save, .btn-edit-cancel {
-  flex: 1;
-  padding: 6px;
-  border: none;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-edit-save { background: #22c55e; color: white; }
-.btn-edit-cancel { background: #f3f4f6; color: #374151; }
-
 /* Empty State */
 .empty-state {
   flex: 1;
@@ -390,14 +279,6 @@ body {
   gap: 8px;
   padding: 10px 16px;
   border-top: 1px solid #f3f4f6;
-}
-
-.tip-text {
-  padding: 0 16px 12px;
-  font-size: 10px;
-  color: #9ca3af;
-  line-height: 1.4;
-  text-align: center;
 }
 
 .btn-add {
@@ -580,4 +461,39 @@ body {
   font-size: 12px;
   color: #6b7280;
   font-weight: 500;
+}
+/* ── New field tags: salary, jobType, workMode ── */
+.app-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 4px 0 6px 0;
+}
+
+.app-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  line-height: 1.5;
+}
+
+.tag-salary {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.tag-jobtype {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+.tag-workmode {
+  background: #fdf4ff;
+  color: #9333ea;
+  border: 1px solid #e9d5ff;
 }

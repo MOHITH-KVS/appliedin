@@ -1,128 +1,44 @@
 // AppliedIn - Shared helpers used by all per-site content scripts
-// Gives every dedicated script (linkedin/naukri/internshala/indeed/glassdoor/unstop)
-// the same "ask the user to confirm" safety net that the universal tracker has,
-// so a missed auto-detection doesn't mean a silently lost application.
 
 window.__appliedinCommon = window.__appliedinCommon || (function () {
-  console.log('[AppliedIn] common.js loaded on', window.location.href);
 
-  function saveApplication(jobData, onDuplicate, onSaved, method) {
-    console.log('[AppliedIn] saveApplication called with:', jobData);
-    const saveMethod = method || 'auto';
-    chrome.storage.local.get(['applications'], function (result) {
-      const applications = result.applications || [];
-
-      let matchedAgainst = null;
-
-      // A URL with no query string that ends in a generic confirmation
-      // path (post-apply, thank-you, success, etc.) is often IDENTICAL
-      // across every application on that site — using it as a dedup key
-      // would make every such application collide with any previous one.
-      // This is exactly what happened with Indeed's smartapply flow.
-      function urlLooksGeneric(url) {
-        if (!url) return true;
-        try {
-          const u = new URL(url);
-          if (u.search) return false; // has query params — likely job-specific
-          return /post-apply|thank-?you|\/success\/?$|\/confirmation\/?$|\/applied\/?$/i.test(u.pathname);
-        } catch (e) {
-          return false;
-        }
-      }
-
-      // Detects role text that's clearly page-chrome or a mis-detection
-      // rather than a real, distinct job title — e.g. "Career Thank you -
-      // GlobalLogic" (grabbed from a confirmation banner). Used ONLY to
-      // decide whether a same-company, close-in-time entry is likely the
-      // SAME submission caught twice by different detection paths — NOT
-      // as a general "these are probably the same job" signal, since
-      // applying to two different roles at the same company in quick
-      // succession is a completely normal, common pattern (e.g. browsing
-      // one employer's listings on Indeed) that must NOT be blocked.
-      function roleLooksLikeMisdetection(role, company) {
-        if (!role) return true;
-        const lower = role.toLowerCase();
-        if (/thank\s*you/.test(lower)) return true;
-        if (/application (submitted|received|complete)/.test(lower)) return true;
-        if (company && lower === company.toLowerCase()) return true;
-        if (role.length < 4) return true;
-        return false;
-      }
-
-      const isDuplicate = applications.some(app => {
-        // Same exact job URL — definitely a duplicate, regardless of when.
-        // Deliberately excludes generic confirmation-page URLs (see
-        // urlLooksGeneric above) — those are identical across every
-        // application on a site and would otherwise make every one of
-        // them collide with any previous one.
-        if (jobData.url && app.url && app.url === jobData.url && !urlLooksGeneric(jobData.url)) {
-          matchedAgainst = { reason: 'same URL', app };
-          return true;
-        }
-
-        // Generic/placeholder text should NEVER count as a match basis —
-        // "Unknown Company" === "Unknown Company" would otherwise flag
-        // every undetected application as a duplicate of any other
-        // undetected one, even completely different jobs. Without a real
-        // company name, only the exact-URL check above can catch a
-        // genuine duplicate.
-        if (app.company === 'Unknown Company' || jobData.company === 'Unknown Company') {
-          return false;
-        }
-
-        const sameCompany = app.company.toLowerCase() === jobData.company.toLowerCase();
-        const withinTightWindow = (new Date() - new Date(app.date)) < 5 * 60 * 1000;
-        const withinDay = (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000;
-
-        // Same company + IDENTICAL role within 24 hours — a real repeat.
-        if (sameCompany && app.role && jobData.role &&
-            app.role.toLowerCase() === jobData.role.toLowerCase() && withinDay) {
-          matchedAgainst = { reason: 'same company+role within 24h', app };
-          return true;
-        }
-
-        // Same company, close in time, AND one of the two role texts
-        // looks like a mis-detection (not a real distinct job title) —
-        // this is the narrow GlobalLogic-style pattern: two detection
-        // methods caught the SAME real submission, one with good data,
-        // one with page-chrome text. Deliberately NOT triggered just by
-        // "same company, close in time" alone — that would wrongly block
-        // legitimate back-to-back applications to different roles at the
-        // same employer.
-        if (sameCompany && withinTightWindow &&
-            (roleLooksLikeMisdetection(app.role, app.company) || roleLooksLikeMisdetection(jobData.role, jobData.company))) {
-          matchedAgainst = { reason: 'same company, one role looks like a mis-detection, within 5min', app };
-          return true;
-        }
-
-        return false;
-      });
-
-      if (isDuplicate) {
-        console.log('[AppliedIn] DUPLICATE MATCH:', matchedAgainst?.reason,
-          '\n  New entry:', { company: jobData.company, role: jobData.role, url: jobData.url },
-          '\n  Matched against:', matchedAgainst?.app && {
-            company: matchedAgainst.app.company, role: matchedAgainst.app.role,
-            url: matchedAgainst.app.url, date: matchedAgainst.app.date
+  // FIX BUG 1: save to IndexedDB via background message passing.
+  // Content scripts can't access IndexedDB directly in the popup context,
+  // so we send a message to the background worker which writes to storage.
+  function saveApplication(jobData, onDuplicate, onSaved) {
+    chrome.runtime.sendMessage(
+      { type: 'SAVE_APPLICATION', data: jobData },
+      function (response) {
+        if (response && response.duplicate) {
+          showNotification('⚠️ Already applied here recently!', 'warning');
+          if (onDuplicate) onDuplicate();
+        } else if (response && response.saved) {
+          showNotification('✅ Application saved — ' + jobData.company, 'success');
+          if (onSaved) onSaved();
+        } else {
+          // Fallback: try direct chrome.storage.local write if message fails
+          chrome.storage.local.get(['applications'], function (result) {
+            const applications = result.applications || [];
+            const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+            const dup = applications.some(app =>
+              app.company.toLowerCase() === jobData.company.toLowerCase() &&
+              app.role.toLowerCase() === jobData.role.toLowerCase() &&
+              new Date(app.date).getTime() > cutoff
+            );
+            if (dup) {
+              showNotification('⚠️ Already applied here recently!', 'warning');
+              if (onDuplicate) onDuplicate();
+              return;
+            }
+            applications.unshift(jobData);
+            chrome.storage.local.set({ applications }, function () {
+              showNotification('✅ Application saved — ' + jobData.company, 'success');
+              if (onSaved) onSaved();
+            });
           });
+        }
       }
-
-      if (isDuplicate) {
-        console.log('[AppliedIn] duplicate detected, not saving');
-        showNotification('⚠️ Already applied here recently!', 'warning');
-        chrome.runtime.sendMessage({ type: 'appliedin_saved', platform: jobData.platform, method: saveMethod }).catch(() => {});
-        if (onDuplicate) onDuplicate();
-        return;
-      }
-
-      applications.unshift(jobData);
-      chrome.storage.local.set({ applications }, function () {
-        console.log('[AppliedIn] saved successfully. Total applications:', applications.length);
-        showNotification('✅ Application saved — ' + jobData.company, 'success');
-        chrome.runtime.sendMessage({ type: 'appliedin_saved', platform: jobData.platform, method: saveMethod }).catch(() => {});
-        if (onSaved) onSaved();
-      });
-    });
+    );
   }
 
   function showNotification(message, type) {
@@ -155,13 +71,14 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     }, 3000);
   }
 
-  // Shown whenever a submit-like button was clicked but we couldn't
-  // confidently auto-confirm success (missing company/role, or no
-  // success phrase found on the page). Lets the user confirm manually
-  // instead of silently dropping the application.
+  // FIX BUG 2: showConfirmPopup now accepts an onDone callback AND
+  // the caller is responsible for marking the URL as handled BEFORE
+  // calling this — so even if the user dismisses it (overlay click, No),
+  // the URL stays handled and the popup never re-appears.
   function showConfirmPopup(defaultData, platformName, onDone) {
+    // Guard: if popup already open, don't open another one
     const existingPopup = document.getElementById('appliedin-confirm');
-    if (existingPopup) existingPopup.remove();
+    if (existingPopup) return;
     const existingOverlay = document.getElementById('appliedin-overlay');
     if (existingOverlay) existingOverlay.remove();
 
@@ -193,18 +110,8 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       border: 1px solid #e5e7eb;
     `;
 
-    const rawCompany = defaultData?.company;
-    const rawRole = defaultData?.role;
-
-    // Treat sentinel 'Unknown Company'/'Unknown Role' as if nothing was
-    // detected at all — showing that literal text as a pre-filled value
-    // looks like a real (if odd) answer, and a hurried person could easily
-    // miss that it's actually a placeholder rather than real data.
-    const hasCompany = rawCompany && rawCompany !== 'Unknown Company';
-    const hasRole = rawRole && rawRole !== 'Unknown Role';
-
-    const safeCompany = (hasCompany ? rawCompany : '').replace(/"/g, '&quot;');
-    const safeRole = (hasRole ? rawRole : '').substring(0, 60).replace(/"/g, '&quot;');
+    const safeCompany = (defaultData?.company || '').replace(/"/g, '&quot;');
+    const safeRole = (defaultData?.role || '').substring(0, 60).replace(/"/g, '&quot;');
 
     popup.innerHTML = `
       <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:6px;">
@@ -213,44 +120,21 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       <div style="font-size:15px;color:#4b5563;margin-bottom:20px;line-height:1.4;">
         Did you complete this application on <strong>${platformName}</strong>?
       </div>
-      <style>
-        #appliedin-confirm input:focus {
-          border-color: #6366f1 !important;
-          box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
-        }
-        #appliedin-confirm input.appliedin-needs-input {
-          border-color: #f59e0b !important;
-          background: #fffbeb !important;
-        }
-        #appliedin-confirm input::placeholder {
-          color: #b45309;
-          font-style: italic;
-        }
-        #appliedin-confirm input:not(.appliedin-needs-input)::placeholder {
-          color: #9ca3af;
-          font-style: normal;
-        }
-      </style>
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
         <input id="appliedin-company"
           value="${safeCompany}"
-          class="${hasCompany ? '' : 'appliedin-needs-input'}"
-          placeholder="${hasCompany ? 'Company name' : "Couldn't detect — click here and type it"}"
+          placeholder="Company name"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          margin-bottom:14px;color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
+          margin-bottom:14px;color:#111827;outline:none;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
         <input id="appliedin-role"
           value="${safeRole}"
-          class="${hasRole ? '' : 'appliedin-needs-input'}"
-          placeholder="${hasRole ? 'Job role' : "Couldn't detect — click here and type it"}"
+          placeholder="Job role"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
-          color:#111827;outline:none;pointer-events:auto !important;user-select:text !important;-webkit-user-select:text !important;cursor:text !important;" />
-        <div style="font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.4;">
-          ✏️ Both fields above are editable — click into either one to type or correct it.
-        </div>
+          color:#111827;outline:none;" />
       </div>
       <div style="display:flex;gap:10px;">
         <button id="appliedin-yes"
@@ -271,11 +155,14 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
 
-    // Auto-focus whichever field needs input first, so it's immediately
-    // obvious (cursor blinking right there) that it's a real, editable
-    // field waiting for input — not stuck placeholder text.
-    const firstNeedsInput = document.querySelector('#appliedin-confirm .appliedin-needs-input');
-    (firstNeedsInput || document.getElementById('appliedin-company'))?.focus();
+    function closePopup() {
+      overlay.remove();
+      popup.remove();
+      // FIX BUG 2: always call onDone when popup is dismissed in any way
+      // The caller (linkedin.js, naukri.js etc) has already set lastHandledUrl
+      // before calling showConfirmPopup, so this won't re-trigger.
+      if (onDone) onDone();
+    }
 
     document.getElementById('appliedin-yes').addEventListener('click', function () {
       const finalCompany = document.getElementById('appliedin-company').value.trim();
@@ -296,124 +183,15 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
         date: new Date().toISOString()
       });
 
-      saveApplication(finalData, undefined, undefined, 'popup_confirm');
+      saveApplication(finalData);
       if (onDone) onDone();
     });
 
-    document.getElementById('appliedin-no').addEventListener('click', function () {
-      overlay.remove();
-      popup.remove();
-      if (onDone) onDone();
-    });
+    document.getElementById('appliedin-no').addEventListener('click', closePopup);
+
+    // FIX BUG 2: overlay click also dismisses and marks handled
+    overlay.addEventListener('click', closePopup);
   }
 
-  // Many job sites embed JobPosting structured data (schema.org) inside
-  // a <script type="application/ld+json"> tag, specifically so Google's
-  // job search can index them. This is far more reliable than guessing
-  // from CSS classes (which change often) or hostnames (which are
-  // sometimes generic) — when present, it's closer to ground truth.
-  function getStructuredJobData() {
-    try {
-      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-      for (const script of scripts) {
-        let data;
-        try {
-          data = JSON.parse(script.textContent);
-        } catch (e) {
-          continue;
-        }
-
-        const items = Array.isArray(data) ? data : (data['@graph'] || [data]);
-
-        for (const item of items) {
-          if (!item) continue;
-          const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
-          if (!types.includes('JobPosting')) continue;
-
-          const title = item.title || null;
-
-          const org = item.hiringOrganization;
-          const company = (org && (org.name || (typeof org === 'string' ? org : null))) || null;
-
-          let location = null;
-          const loc = item.jobLocation;
-          const locEntry = Array.isArray(loc) ? loc[0] : loc;
-          const address = locEntry && locEntry.address;
-          if (address) {
-            location = [address.addressLocality, address.addressRegion, address.addressCountry]
-              .filter(Boolean).join(', ');
-          }
-
-          if (title || company) {
-            return { title, company, location: location || null };
-          }
-        }
-      }
-    } catch (e) {
-      // ignore — this is a best-effort enhancement, not critical path
-    }
-    return null;
-  }
-
-  // Some sites briefly show transient status text like "Applying for X..."
-  // or "Submitting..." right when a selector fires mid-animation, and that
-  // gets mistakenly captured as if it were the actual role name. This
-  // strips known transient prefixes and flags text that still looks
-  // unusable afterward, so callers can fall back to asking instead of
-  // confidently saving garbage.
-  function cleanAndValidateText(text) {
-    if (!text) return null;
-
-    let cleaned = text.trim();
-
-    const transientPrefixes = [
-      /^applying for\s*/i,
-      /^apply for\s*/i,
-      /^submitting\s*/i,
-      /^please wait\.*/i,
-      /^loading\.*/i,
-      /^processing\.*/i
-    ];
-    for (const pattern of transientPrefixes) {
-      cleaned = cleaned.replace(pattern, '').trim();
-    }
-
-    // Still looks like leftover status text, or too short to be a real
-    // role/company name, or ends mid-sentence with "..."
-    if (
-      !cleaned ||
-      cleaned.length < 2 ||
-      /\.\.\.$/.test(cleaned) ||
-      /^(applying|submitting|loading|processing|please wait|applying for)$/i.test(cleaned)
-    ) {
-      return null;
-    }
-
-    // Greeting banners and dashboard chrome ("Welcome, [Name]...", "Hi
-    // there", "My Applications") also get accidentally grabbed by generic
-    // selectors — reject those patterns too.
-    const lower = cleaned.toLowerCase();
-    if (
-      /^welcome\b/.test(lower) ||
-      /^(hi|hello|hey)\b/.test(lower) ||
-      /^you have\b/.test(lower) ||
-      /^my (applications|progress|profile|account)\b/.test(lower) ||
-      cleaned.length > 80
-    ) {
-      return null;
-    }
-
-    return cleaned;
-  }
-
-  // Same validator, used for both fields — the transient-text problem
-  // ("Applying for...", "Submitting...") shows up identically whether it
-  // leaks into the role or the company field.
-  const cleanAndValidateRole = cleanAndValidateText;
-  const cleanAndValidateCompany = cleanAndValidateText;
-
-  return {
-    saveApplication, showNotification, showConfirmPopup, getStructuredJobData,
-    cleanAndValidateRole, cleanAndValidateCompany
-  };
+  return { saveApplication, showNotification, showConfirmPopup };
 })();

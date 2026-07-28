@@ -1,17 +1,13 @@
 {
   "manifest_version": 3,
   "name": "AppliedIn",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Built for Indian freshers.",
   "permissions": [
     "storage",
-    "unlimitedStorage",
     "activeTab",
     "scripting",
-    "tabs",
-    "contextMenus",
-    "alarms",
-    "notifications"
+    "tabs"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
@@ -21,7 +17,13 @@
     "https://*.glassdoor.com/*",
     "https://*.glassdoor.co.in/*",
     "https://unstop.com/*",
-    "<all_urls>"
+    "<all_urls>",
+    "https://www.hirist.tech/*",
+    "https://www.hirist.com/*",
+    "https://cutshort.io/*",
+    "https://www.shine.com/*",
+    "https://www.foundit.in/*",
+    "https://www.freshersworld.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -39,47 +41,119 @@
       "128": "icons/icon128.png"
     }
   },
-  "commands": {
-    "log-application": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+L",
-        "mac": "Command+Shift+L"
-      },
-      "description": "Log this page as a job application"
-    }
-  },
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/*"],
-      "js": ["content/common.js", "content/linkedin.js"]
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/linkedin.js"
+      ]
     },
     {
-      "matches": ["https://www.naukri.com/*"],
-      "js": ["content/common.js", "content/naukri.js"]
+      "matches": [
+        "https://www.naukri.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/naukri.js"
+      ]
     },
     {
-      "matches": ["https://internshala.com/*"],
-      "js": ["content/common.js", "content/internshala.js"]
+      "matches": [
+        "https://internshala.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/internshala.js"
+      ]
     },
     {
-      "matches": ["https://*.indeed.com/*"],
-      "js": ["content/common.js", "content/indeed.js"],
+      "matches": [
+        "https://*.indeed.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/indeed.js"
+      ],
       "all_frames": true
     },
     {
-      "matches": ["https://*.glassdoor.com/*", "https://*.glassdoor.co.in/*"],
-      "js": ["content/common.js", "content/glassdoor.js"],
+      "matches": [
+        "https://*.glassdoor.com/*",
+        "https://*.glassdoor.co.in/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/glassdoor.js"
+      ],
       "all_frames": true
     },
     {
-      "matches": ["https://unstop.com/*"],
-      "js": ["content/common.js", "content/unstop.js"]
+      "matches": [
+        "https://unstop.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/unstop.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.hirist.tech/*",
+        "https://www.hirist.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/hirist.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://cutshort.io/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/cutshort.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.shine.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/shine.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.foundit.in/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/foundit.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.freshersworld.com/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/freshersworld.js"
+      ]
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["xlsx.full.min.js"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "xlsx.full.min.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

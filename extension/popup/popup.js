@@ -4,56 +4,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
   let allApplications = [];
   let currentFilter = 'all';
-  let currentDateFilter = 'all';
   let currentSearch = '';
   let currentExportType = ''; // 'csv' or 'excel'
 
-  // ── Show current version — makes it obvious at a glance whether a
-  // reloaded/updated extension is actually the one running ──
-  const versionEl = document.getElementById('appVersion');
-  if (versionEl) {
-    versionEl.textContent = 'v' + chrome.runtime.getManifest().version;
-  }
-
-  chrome.runtime.sendMessage({ type: 'appliedin_popup_opened' }).catch(() => {});
-
-  // ── Load Applications ──
+  // ── Load Applications — FIX BUG 1: reads from IndexedDB ──
   function loadApplications() {
-    chrome.storage.local.get(['applications'], function (result) {
-      allApplications = result.applications || [];
+    AppliedInDB.getAll(function (apps) {
+      allApplications = apps;
       updateStats();
-      renderWeeklySummary();
       renderApplications();
     });
   }
 
-  // ── Weekly Summary ──
-  function renderWeeklySummary() {
-    const el = document.getElementById('weeklySummary');
-    if (!el) return;
-
-    const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-
-    const thisWeek = allApplications.filter(a => new Date(a.date) >= weekStart);
-
-    if (thisWeek.length === 0) {
-      el.style.display = 'none';
-      return;
-    }
-
-    const movedForward = thisWeek.filter(a => a.status !== 'Applied' && a.status !== 'Rejected').length;
-    const rejected = thisWeek.filter(a => a.status === 'Rejected').length;
-
-    let parts = [`📈 This week: <strong>${thisWeek.length}</strong> applied`];
-    if (movedForward > 0) parts.push(`<strong>${movedForward}</strong> moved forward`);
-    if (rejected > 0) parts.push(`<strong>${rejected}</strong> rejected`);
-
-    el.innerHTML = parts.join(' · ');
-    el.style.display = 'block';
-  }
+  // Run migration on first open (moves old chrome.storage.local data to IndexedDB)
+  AppliedInDB.migrateFromLocalStorage(function () {
+    loadApplications();
+  });
 
   // ── Update Stats ──
   function updateStats() {
@@ -132,7 +98,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const list = document.getElementById('applicationsList');
     const emptyState = document.getElementById('emptyState');
 
-    let filtered = currentDateFilter !== 'all' ? filterByPeriod(currentDateFilter) : allApplications;
+    let filtered = allApplications;
 
     if (currentFilter !== 'all') {
       filtered = filtered.filter(app => app.status === currentFilter);
@@ -168,23 +134,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
       const card = document.createElement('div');
       card.className = 'app-card';
+      // Build optional tags for salary, jobType, workMode
+      const salaryTag = app.salary
+        ? `<span class="app-tag tag-salary">💰 ${escapeHtml(app.salary)}</span>` : '';
+      const jobTypeTag = app.jobType
+        ? `<span class="app-tag tag-jobtype">${escapeHtml(app.jobType)}</span>` : '';
+      const workModeTag = app.workMode && app.workMode !== 'On-site'
+        ? `<span class="app-tag tag-workmode">${escapeHtml(app.workMode)}</span>` : '';
+      const tagsHtml = (salaryTag || jobTypeTag || workModeTag)
+        ? `<div class="app-tags">${salaryTag}${jobTypeTag}${workModeTag}</div>` : '';
+
       card.innerHTML = `
         <div class="app-card-top">
           <div class="app-company">${escapeHtml(app.company)}</div>
-          <div class="card-actions">
-            <button class="btn-edit" data-index="${realIndex}" title="Edit company/role">✏️</button>
-            <button class="btn-delete" data-index="${realIndex}">🗑</button>
-          </div>
+          <button class="btn-delete" data-index="${realIndex}">🗑</button>
         </div>
         <div class="app-role" title="${escapeHtml(app.role)}">${escapeHtml(app.role)}</div>
-        <div class="edit-form" data-index="${realIndex}" style="display:none;">
-          <input type="text" class="edit-company" value="${escapeHtml(app.company)}" placeholder="Company name" />
-          <input type="text" class="edit-role" value="${escapeHtml(app.role)}" placeholder="Job role" />
-          <div class="edit-form-actions">
-            <button class="btn-edit-save" data-index="${realIndex}">Save</button>
-            <button class="btn-edit-cancel" data-index="${realIndex}">Cancel</button>
-          </div>
-        </div>
+        ${tagsHtml}
         <div class="app-card-bottom">
           <div class="app-meta">
             <span class="app-platform">${escapeHtml(app.platform || 'Unknown')}</span>
@@ -205,13 +171,7 @@ document.addEventListener('DOMContentLoaded', function () {
       card.addEventListener('click', function (e) {
         if (
           e.target.classList.contains('btn-delete') ||
-          e.target.classList.contains('btn-edit') ||
-          e.target.classList.contains('btn-edit-save') ||
-          e.target.classList.contains('btn-edit-cancel') ||
-          e.target.classList.contains('edit-company') ||
-          e.target.classList.contains('edit-role') ||
-          e.target.classList.contains('status-select') ||
-          card.querySelector('.edit-form').style.display === 'block'
+          e.target.classList.contains('status-select')
         ) return;
         if (app.url) chrome.tabs.create({ url: app.url });
       });
@@ -219,62 +179,64 @@ document.addEventListener('DOMContentLoaded', function () {
       list.appendChild(card);
     });
 
-    // Edit toggle
-    document.querySelectorAll('.btn-edit').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const idx = this.dataset.index;
-        const form = document.querySelector(`.edit-form[data-index="${idx}"]`);
-        if (form) form.style.display = form.style.display === 'block' ? 'none' : 'block';
-      });
-    });
-
-    document.querySelectorAll('.btn-edit-cancel').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const form = document.querySelector(`.edit-form[data-index="${this.dataset.index}"]`);
-        if (form) form.style.display = 'none';
-      });
-    });
-
-    document.querySelectorAll('.btn-edit-save').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const idx = parseInt(this.dataset.index);
-        const form = document.querySelector(`.edit-form[data-index="${idx}"]`);
-        const newCompany = form.querySelector('.edit-company').value.trim();
-        const newRole = form.querySelector('.edit-role').value.trim();
-
-        if (!newCompany || !newRole) {
-          alert('Company and role cannot be empty.');
-          return;
-        }
-
-        allApplications[idx].company = newCompany;
-        allApplications[idx].role = newRole;
-        chrome.storage.local.set({ applications: allApplications }, loadApplications);
-      });
-    });
-
-    // Status change
+    // Status change — FIX BUG 1: update via IndexedDB using record id
     document.querySelectorAll('.status-select').forEach(function (select) {
       select.addEventListener('change', function () {
         const idx = parseInt(this.dataset.index);
-        allApplications[idx].status = this.value;
-        chrome.storage.local.set({ applications: allApplications }, loadApplications);
+        const app = allApplications[idx];
+        AppliedInDB.update(app.id, { status: this.value }, loadApplications);
       });
     });
 
-    // Delete
+    // FIX BUG 3: Delete with inline confirm — no window.confirm() which is
+    // blocked in MV3 extension popups on some Chrome versions.
     document.querySelectorAll('.btn-delete').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         const idx = parseInt(this.dataset.index);
+        const card = this.closest('.app-card');
         const company = allApplications[idx].company;
-        if (confirm(`Delete application for ${company}?`)) {
-          allApplications.splice(idx, 1);
-          chrome.storage.local.set({ applications: allApplications }, loadApplications);
-        }
+
+        // If inline confirm already showing on this card, remove it
+        const existing = card.querySelector('.delete-confirm-row');
+        if (existing) { existing.remove(); return; }
+
+        // Build inline confirm row
+        const confirmRow = document.createElement('div');
+        confirmRow.className = 'delete-confirm-row';
+        confirmRow.style.cssText = `
+          display:flex; align-items:center; justify-content:space-between;
+          gap:8px; padding:8px 0 0 0; border-top:1px solid #fee2e2;
+          margin-top:8px;
+        `;
+        confirmRow.innerHTML = `
+          <span style="font-size:12px;color:#ef4444;font-weight:500;">
+            Delete "${company}"?
+          </span>
+          <div style="display:flex;gap:6px;">
+            <button class="confirm-yes" style="
+              padding:4px 12px;background:#ef4444;color:white;
+              border:none;border-radius:6px;font-size:12px;
+              font-weight:600;cursor:pointer;">Yes</button>
+            <button class="confirm-no" style="
+              padding:4px 12px;background:#f3f4f6;color:#374151;
+              border:none;border-radius:6px;font-size:12px;
+              font-weight:600;cursor:pointer;">No</button>
+          </div>
+        `;
+
+        card.appendChild(confirmRow);
+
+        confirmRow.querySelector('.confirm-yes').addEventListener('click', function(e) {
+          e.stopPropagation();
+          // FIX BUG 1: delete from IndexedDB by record id
+          const app = allApplications[idx];
+          AppliedInDB.remove(app.id, loadApplications);
+        });
+        confirmRow.querySelector('.confirm-no').addEventListener('click', function(e) {
+          e.stopPropagation();
+          confirmRow.remove();
+        });
       });
     });
   }
@@ -291,25 +253,6 @@ document.addEventListener('DOMContentLoaded', function () {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       this.classList.add('active');
       currentFilter = this.dataset.filter;
-      renderApplications();
-    });
-  });
-
-  // ── Stat Boxes as Date Filters ──
-  document.querySelectorAll('.stat[data-period]').forEach(function (stat) {
-    stat.addEventListener('click', function () {
-      const period = this.dataset.period;
-
-      if (currentDateFilter === period) {
-        // Clicking the already-active one clears the filter
-        currentDateFilter = 'all';
-        document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
-      } else {
-        currentDateFilter = period;
-        document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
-        this.classList.add('active');
-      }
-
       renderApplications();
     });
   });
@@ -347,10 +290,13 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
+    // FIX BUG 1: duplicate check via IndexedDB
+    // (We check allApplications in memory since it's already loaded — fast)
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const isDuplicate = allApplications.some(app =>
       app.company.toLowerCase() === company.toLowerCase() &&
       app.role.toLowerCase() === role.toLowerCase() &&
-      (new Date() - new Date(app.date)) < 24 * 60 * 60 * 1000
+      new Date(app.date).getTime() > cutoff
     );
 
     if (isDuplicate) {
@@ -358,15 +304,16 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
-    allApplications.unshift({
+    const newApp = {
       company, role,
       location: location || 'Unknown Location',
       platform, url: '',
       date: new Date().toISOString(),
       status
-    });
+    };
 
-    chrome.storage.local.set({ applications: allApplications }, function () {
+    // FIX BUG 1: save to IndexedDB
+    AppliedInDB.add(newApp, function () {
       closeModal();
       loadApplications();
     });
@@ -440,12 +387,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── Download CSV ──
   function downloadCSV(data) {
-    const headers = ['Company', 'Role', 'Location', 'Platform', 'Status', 'Date Applied', 'URL'];
+    const headers = ['Company', 'Role', 'Location', 'Platform', 'Salary', 'Job Type', 'Work Mode', 'Status', 'Date Applied', 'URL'];
     const rows = data.map(app => [
       `"${app.company}"`,
       `"${app.role}"`,
       `"${app.location || ''}"`,
       `"${app.platform || ''}"`,
+      `"${app.salary || ''}"`,
+      `"${app.jobType || ''}"`,
+      `"${app.workMode || ''}"`,
       `"${app.status}"`,
       `"${formatDateFull(app.date)}"`,
       `"${app.url || ''}"`
@@ -461,39 +411,60 @@ document.addEventListener('DOMContentLoaded', function () {
     URL.revokeObjectURL(url);
   }
 
-  // ── Download Excel ──
+  // ── Download Excel — FIX BUG 4: lazy load xlsx only when needed ──
   function downloadExcel(data) {
-    const rows = [
-      ['Company', 'Role', 'Location', 'Platform', 'Status', 'Date Applied', 'Job URL']
-    ];
+    const btn = document.getElementById('exportDownload');
+    const originalText = btn.textContent;
+    btn.textContent = 'Loading...';
+    btn.disabled = true;
 
-    data.forEach(app => {
-      rows.push([
-        app.company || '',
-        app.role || '',
-        app.location || '',
-        app.platform || '',
-        app.status || '',
-        formatDateFull(app.date),
-        app.url || ''
-      ]);
-    });
+    function doExport() {
+      const rows = [
+        ['Company', 'Role', 'Location', 'Platform', 'Salary', 'Job Type', 'Work Mode', 'Status', 'Date Applied', 'Job URL']
+      ];
+      data.forEach(app => {
+        rows.push([
+          app.company || '',
+          app.role || '',
+          app.location || '',
+          app.platform || '',
+          app.salary || '',
+          app.jobType || '',
+          app.workMode || '',
+          app.status || '',
+          formatDateFull(app.date),
+          app.url || ''
+        ]);
+      });
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 25 }, { wch: 30 }, { wch: 20 }, { wch: 15 },
+        { wch: 18 }, { wch: 14 }, { wch: 12 },
+        { wch: 15 }, { wch: 22 }, { wch: 40 }
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, 'Applications');
+      XLSX.writeFile(wb, `AppliedIn_${formatDateFile(new Date())}.xlsx`);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // If already loaded, use it directly
+    if (typeof XLSX !== 'undefined') {
+      doExport();
+      return;
+    }
 
-    ws['!cols'] = [
-      { wch: 25 },
-      { wch: 30 },
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 22 },
-      { wch: 40 }
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Applications');
-    XLSX.writeFile(wb, `AppliedIn_${formatDateFile(new Date())}.xlsx`);
+    // Otherwise inject script dynamically — loads only once, on first Excel export
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('../xlsx.full.min.js');
+    script.onload = function() { doExport(); };
+    script.onerror = function() {
+      btn.textContent = originalText;
+      btn.disabled = false;
+      alert('Failed to load Excel library. Try again.');
+    };
+    document.head.appendChild(script);
   }
 
   // ── Helpers ──
@@ -507,23 +478,12 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!isoString) return '';
     const date = new Date(isoString);
     const now = new Date();
-
-    // Calendar-day boundaries, not a rolling 24h window — an application
-    // from 10pm yesterday should say "Yesterday", not "Today", even
-    // though fewer than 24 raw hours have passed since then.
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-
-    const entryDayStart = new Date(date);
-    entryDayStart.setHours(0, 0, 0, 0);
-
-    const dayDiff = Math.round((todayStart - entryDayStart) / (1000 * 60 * 60 * 24));
+    const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
     const time = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
-
-    if (dayDiff === 0) return `Today, ${time}`;
-    if (dayDiff === 1) return `Yesterday, ${time}`;
-    if (dayDiff < 7) return `${dayDiff} days ago, ${time}`;
-    if (dayDiff < 30) return `${Math.floor(dayDiff / 7)} weeks ago`;
+    if (diff === 0) return `Today, ${time}`;
+    if (diff === 1) return `Yesterday, ${time}`;
+    if (diff < 7) return `${diff} days ago, ${time}`;
+    if (diff < 30) return `${Math.floor(diff / 7)} weeks ago`;
     return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   }
 
@@ -537,5 +497,6 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // ── Initial Load ──
-  loadApplications();
+  // Note: loadApplications() is now called inside migrateFromLocalStorage()
+  // above, so existing users' data is migrated on first open automatically.
 });

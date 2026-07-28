@@ -9,35 +9,44 @@
 (function () {
   console.log('[AppliedIn] indeed.js loaded on', window.location.href);
 
-  // Chat/messaging pages legitimately contain application-related phrases
-  // in normal conversation — never a real submission confirmation. This
-  // script should not run there at all.
-  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
-  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
-    console.log('[AppliedIn] indeed.js: excluded page type, not running');
-    return;
-  }
-
   let lastHandledUrl = null;
-  let lastHandledAt = 0;
-  const REARM_COOLDOWN_MS = 8000;
 
-  function isRecentlyHandled() {
-    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
+  function extractSalary() {
+    const selectors = [
+      '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
+      '[data-testid*="salary"]', '[class*="compensation"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.trim()) return el.innerText.trim();
+    }
+    const match = (document.body.innerText || '').match(
+      /(₹[\d,]+\s*(?:LPA|lpa|L|k|\/month|per month|stipend)?[\s\-\u2013to]*₹?[\d,]*\s*(?:LPA|lpa|L|k)?)/
+    );
+    return match ? match[1].trim() : '';
   }
 
-  function markHandled() {
-    lastHandledUrl = normalizedUrl();
-    lastHandledAt = Date.now();
+  function extractJobType() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('internship')) return 'Internship';
+    if (text.includes('full-time') || text.includes('full time')) return 'Full-Time';
+    if (text.includes('part-time') || text.includes('part time')) return 'Part-Time';
+    if (text.includes('contract')) return 'Contract';
+    if (text.includes('freelance')) return 'Freelance';
+    return '';
   }
 
-  // SPA-style portals often mutate query strings/hash on internal
-  // navigation without a real reload - comparing origin+pathname only
-  // avoids false re-triggers from those irrelevant URL changes.
-  function normalizedUrl() {
-    return window.location.origin + window.location.pathname;
+  function extractWorkMode() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('work from home') || text.includes('remote')) return 'Remote';
+    if (text.includes('hybrid')) return 'Hybrid';
+    return 'On-site';
   }
-  const PENDING_KEY = 'appliedin_pending_application';
+
+  // FIX BUG 2: Use a tab-unique pending key so two tabs (e.g. LinkedIn + Naukri)
+  // never overwrite each other's cached job data.
+  // performance.now() gives microsecond precision unique to each tab's page load.
+  const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
   // Only the exact, specific confirmation heading — deliberately narrow.
@@ -54,6 +63,10 @@
     return url.includes('post-apply') || url.includes('application-sent') || url.includes('applied=1');
   }
 
+
+  function isPopupOpen() {
+    return !!document.getElementById('appliedin-confirm');
+  }
   function bodyLooksLikeFinalSuccess() {
     const bodyText = (document.body.innerText || '').toLowerCase();
     return successPhrases.some(p => bodyText.includes(p));
@@ -61,23 +74,18 @@
 
   function getJobDetailsFromListingPage() {
     try {
-      const structured = window.__appliedinCommon?.getStructuredJobData?.();
-
       const title =
-        structured?.title ||
         document.querySelector('.jobsearch-JobInfoHeader-title')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
-        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
+        document.querySelector('h1')?.innerText?.trim() ||
         null;
 
       const company =
-        structured?.company ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[data-company-name="true"]')?.innerText?.trim()) ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[class*="companyName"]')?.innerText?.trim()) ||
+        document.querySelector('[data-company-name="true"]')?.innerText?.trim() ||
+        document.querySelector('[class*="companyName"]')?.innerText?.trim() ||
         null;
 
       const location =
-        structured?.location ||
         document.querySelector('[data-testid="job-location"]')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
@@ -88,6 +96,9 @@
         company,
         role: title,
         location,
+        salary: extractSalary(),
+        jobType: extractJobType(),
+        workMode: extractWorkMode(),
         platform: 'Indeed',
         url: window.location.href,
         date: new Date().toISOString(),
@@ -98,44 +109,21 @@
     }
   }
 
-  // The confirmation heading ("Your application has been submitted!") is
-  // often the ONLY h1/h2 on this page — grabbing it as if it were the job
-  // role was a serious bug: it's identical across every single Indeed
-  // application, which meant every later application would also get this
-  // same text and get falsely flagged as a duplicate of the first one.
-  function looksLikeConfirmationMessage(text) {
-    if (!text) return true;
-    const lower = text.toLowerCase();
-    return successPhrases.some(p => lower.includes(p)) ||
-      lower.includes('submitted') || lower.includes('thank you') ||
-      lower.includes('congratulations');
-  }
-
   // Fallback: on the smartapply summary card itself (seen on the right side
   // of the apply flow), the role/company are often shown even though the
   // rest of the DOM is unfamiliar. Never returns null — this is the last
   // resort before showing the popup, so it must always produce something.
   function getJobDetailsFromApplySummary() {
     try {
-      const h1Text = document.querySelector('h1, h2')?.innerText?.trim();
-      const role = (h1Text && !looksLikeConfirmationMessage(h1Text)) ? h1Text : null;
-      const companyLine = window.__appliedinCommon?.cleanAndValidateCompany?.(
-        document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim()
-      ) || null;
+      const role = document.querySelector('h1, h2')?.innerText?.trim() || 'Unknown Role';
+      const companyLine = document.querySelector('[class*="company"], [class*="Company"]')?.innerText?.trim() || 'Unknown Company';
 
       return {
-        company: companyLine || 'Unknown Company',
-        role: role || 'Unknown Role',
+        company: companyLine,
+        role,
         location: 'Unknown Location',
         platform: 'Indeed',
-        // Deliberately NOT window.location.href here — this confirmation
-        // page's URL (smartapply.indeed.com/.../post-apply) is generic
-        // and IDENTICAL across every single Indeed application. Using it
-        // as the dedup key was making every fallback-detected application
-        // match any previous one via the exact-URL duplicate check —
-        // completely bypassing the company/role comparison logic, since
-        // that check runs first and returns immediately.
-        url: '',
+        url: window.location.href,
         date: new Date().toISOString(),
         status: 'Applied'
       };
@@ -145,7 +133,7 @@
         role: 'Unknown Role',
         location: 'Unknown Location',
         platform: 'Indeed',
-        url: '',
+        url: window.location.href,
         date: new Date().toISOString(),
         status: 'Applied'
       };
@@ -179,13 +167,13 @@
   }
 
   function handleFinalSuccess() {
-    if (isRecentlyHandled()) return;
-    markHandled();
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetailsFromApplySummary();
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Indeed', function () {
@@ -193,7 +181,7 @@
         });
       } else {
         // couldn't read anything — allow a later mutation to retry
-        lastHandledUrl = null; lastHandledAt = 0;
+        lastHandledUrl = null;
       }
     });
   }
@@ -248,7 +236,7 @@
     if (window.location.href === lastCheckedUrl) return;
     lastCheckedUrl = window.location.href;
 
-    if (isRecentlyHandled()) return;
+    if (lastHandledUrl === window.location.href) return;
     if (urlLooksLikeFinalSuccess()) {
       setTimeout(handleFinalSuccess, 800);
     }

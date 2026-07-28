@@ -4,157 +4,77 @@
 (function () {
   console.log('[AppliedIn] internshala.js loaded on', window.location.href);
 
-  // Chat/messaging pages legitimately contain phrases like "your
-  // application has been received" as normal conversation text — that
-  // is NOT a submission confirmation, and this script should never run
-  // there at all. This was firing false popups on Internshala's chat
-  // inbox, using a completely unrelated job's info from the sidebar.
-  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
-  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
-    console.log('[AppliedIn] internshala.js: excluded page type, not running');
-    return;
-  }
-
-  // Tracks the URL we already handled, with a cooldown rather than a
-  // permanent lock — this blocks immediate re-triggers for the SAME
-  // event (e.g. rapid duplicate DOM mutations), while still allowing a
-  // genuinely NEW, later application on the same page to be caught —
-  // important for "Recommended jobs for you" widgets where someone
-  // applies to a second job shortly after the first.
+  // Tracks the URL we already handled — prevents re-asking on every
+  // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
-  let lastHandledAt = 0;
-  const REARM_COOLDOWN_MS = 8000;
 
-  function isRecentlyHandled() {
-    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
-  }
-
-  function markHandled() {
-    lastHandledUrl = normalizedUrl();
-    lastHandledAt = Date.now();
-  }
-
-  // SPA-style portals often mutate query strings/hash on internal
-  // navigation without a real reload - comparing origin+pathname only
-  // avoids false re-triggers from those irrelevant URL changes.
-  function normalizedUrl() {
-    return window.location.origin + window.location.pathname;
-  }
-
-  // Some sites (Internshala included) overlay a "Recommended jobs for
-  // you" modal on TOP of the actual application form — a naive selector
-  // can grab an unrelated job's company from that overlay instead of the
-  // real one being applied to. Skip anything inside a modal/overlay/
-  // recommendation container.
-  function isInsideExcludedContainer(el) {
-    if (!el) return false;
-    return !!el.closest(
-      '[class*="modal" i], [class*="overlay" i], [class*="recommend" i], ' +
-      '[class*="popup" i], [id*="modal" i], [class*="suggestion" i]'
-    );
-  }
-
-  function textFromSelector(selector) {
-    const el = document.querySelector(selector);
-    if (!el || isInsideExcludedContainer(el)) return null;
-    return el.innerText?.trim() || null;
-  }
-
-  // Final sanity check on ANY extracted text before it's trusted, from
-  // any source. A '|' character or unusual length is a strong sign that
-  // a selector accidentally grabbed multiple concatenated UI elements
-  // (e.g. "CompanyRole internship|Chatting") rather than one clean value.
-  function looksLikeGarbledConcatenation(text) {
-    if (!text) return false;
-    if (text.includes('|')) return true;
-    if (text.length > 80) return true;
-    // Two capital-letter "words" running together with no space
-    // ("WordscloudAI") is another common symptom of concatenation.
-    if (/[a-z][A-Z]{2,}/.test(text)) return true;
-    return false;
-  }
-
-  // Internshala's application URLs encode the exact role and company
-  // directly, e.g. ".../form/fresher-remote-junior-data-analyst-job-at-
-  // datavinci-private-limited1783937402" — far more reliable than
-  // guessing CSS class names, which can silently go stale.
-  function parseFromUrlSlug() {
-    try {
-      const path = decodeURIComponent(window.location.pathname);
-      const match = path.match(/\/form\/(.+?)-job-at-([a-z0-9-]+?)(\d+)?\/?$/i);
-      if (!match) return null;
-
-      const roleSlug = match[1];
-      const companySlug = match[2];
-
-      const toTitleCase = (slug) =>
-        slug.split('-').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-
-      const role = toTitleCase(roleSlug);
-      const company = toTitleCase(companySlug);
-
-      if (!role || !company) return null;
-      return { role, company };
-    } catch (e) {
-      return null;
+  function extractSalary() {
+    const selectors = [
+      '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
+      '[data-testid*="salary"]', '[class*="compensation"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.trim()) return el.innerText.trim();
     }
+    // Regex scan for salary patterns in page text
+    const match = (document.body.innerText || '').match(
+      /(₹[\d,]+\s*(?:LPA|lpa|L|k|\/month|per month|stipend)?[\s\-–to]*₹?[\d,]*\s*(?:LPA|lpa|L|k)?)/
+    );
+    return match ? match[1].trim() : '';
   }
+
+  function extractJobType() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('internship')) return 'Internship';
+    if (text.includes('full-time') || text.includes('full time')) return 'Full-Time';
+    if (text.includes('part-time') || text.includes('part time')) return 'Part-Time';
+    if (text.includes('contract')) return 'Contract';
+    if (text.includes('freelance')) return 'Freelance';
+    return '';
+  }
+
+  function extractWorkMode() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('work from home') || text.includes('remote')) return 'Remote';
+    if (text.includes('hybrid')) return 'Hybrid';
+    return 'On-site';
+  }
+
 
   function getJobDetails() {
     try {
-      const structured = window.__appliedinCommon?.getStructuredJobData?.();
-      const clean = window.__appliedinCommon?.cleanAndValidateRole;
-      const urlParsed = parseFromUrlSlug();
+      const title =
+        document.querySelector('.profile')?.innerText?.trim() ||
+        document.querySelector('[class*="profile-title"]')?.innerText?.trim() ||
+        document.querySelector('h1')?.innerText?.trim() ||
+        'Unknown Role';
 
-      const titleCandidates = [
-        structured?.title,
-        urlParsed?.role,
-        textFromSelector('.profile'),
-        textFromSelector('[class*="profile-title"]'),
-        textFromSelector('h1')
-      ];
-      const title = titleCandidates
-        .map(t => clean ? clean(t) : t)
-        .find(t => t && !looksLikeGarbledConcatenation(t)) || 'Unknown Role';
-
-      const companyCandidates = [
-        structured?.company,
-        urlParsed?.company,
-        textFromSelector('.company-name a'),
-        textFromSelector('.company-name'),
-        textFromSelector('[class*="company"]')
-      ];
-      const company = companyCandidates
-        .map(c => clean ? clean(c) : c)
-        .find(c => c && !looksLikeGarbledConcatenation(c)) || 'Unknown Company';
+      const company =
+        document.querySelector('.company-name a')?.innerText?.trim() ||
+        document.querySelector('.company-name')?.innerText?.trim() ||
+        document.querySelector('[class*="company"]')?.innerText?.trim() ||
+        'Unknown Company';
 
       const location =
-        structured?.location ||
-        textFromSelector('.location_link') ||
-        textFromSelector('[class*="location"]') ||
+        document.querySelector('.location_link')?.innerText?.trim() ||
+        document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Work From Home';
 
       return {
         company,
         role: title,
         location,
+        salary: extractSalary(),
+        jobType: extractJobType(),
+        workMode: extractWorkMode(),
         platform: 'Internshala',
         url: window.location.href,
         date: new Date().toISOString(),
         status: 'Applied'
       };
     } catch (e) {
-      // Even on error, return SOMETHING so a popup can still be shown —
-      // never go completely silent.
-      return {
-        company: 'Unknown Company',
-        role: 'Unknown Role',
-        location: 'Work From Home',
-        platform: 'Internshala',
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
-      };
+      return null;
     }
   }
 
@@ -164,9 +84,7 @@
     'you have applied',
     'your application has been sent',
     'application sent successfully',
-    'thank you for applying',
-    'has been submitted',
-    'has been received'
+    'thank you for applying'
   ];
 
   function saveApplication(jobData) {
@@ -177,25 +95,30 @@
     });
   }
 
+
+  // Guard: if confirm popup already open (user typing), skip — don't interrupt.
+  function isPopupOpen() {
+    return !!document.getElementById('appliedin-confirm');
+  }
   function bodyLooksLikeSuccess() {
     const bodyText = (document.body.innerText || '').toLowerCase();
     return successPhrases.some(p => bodyText.includes(p));
   }
 
   function handleSuccess() {
-    if (isRecentlyHandled()) return;
-    markHandled();
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
 
     const jobData = getJobDetails();
 
-    if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
+    if (jobData && jobData.company !== 'Unknown Company') {
       saveApplication(jobData);
     } else if (jobData) {
       window.__appliedinCommon.showConfirmPopup(jobData, 'Internshala', function () {
         // user answered — this URL stays marked as handled
       });
     } else {
-      lastHandledUrl = null; lastHandledAt = 0;
+      lastHandledUrl = null;
     }
   }
 
@@ -212,7 +135,7 @@
       text === 'send application' ||
       text === 'confirm'
     ) {
-      if (isRecentlyHandled()) return;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
@@ -222,22 +145,18 @@
     }
   });
 
-  // METHOD 2 — Watch for success message (debounced)
-  let mutationDebounce = null;
+  // METHOD 2 — Watch for success message
   const observer = new MutationObserver(function () {
-    clearTimeout(mutationDebounce);
-    mutationDebounce = setTimeout(() => {
-      if (isRecentlyHandled()) return;
-      if (bodyLooksLikeSuccess()) {
-        setTimeout(handleSuccess, 1000);
-      }
-    }, 400);
+    if (lastHandledUrl === window.location.href) return;
+    if (isPopupOpen()) return;
+    if (bodyLooksLikeSuccess()) {
+      setTimeout(handleSuccess, 1000);
+    }
   });
 
   observer.observe(document.body, {
     childList: true,
-    subtree: true,
-    characterData: true
+    subtree: true
   });
 
 })();

@@ -8,37 +8,47 @@
 (function () {
   console.log('[AppliedIn] linkedin.js loaded on', window.location.href);
 
-  // Chat/messaging pages legitimately contain application-related phrases
-  // in normal conversation — never a real submission confirmation. This
-  // script should not run there at all.
-  const EXCLUDED_PATH_PATTERNS = ['/messaging/', '/chat/', '/inbox'];
-  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
-    console.log('[AppliedIn] linkedin.js: excluded page type, not running');
-    return;
+  function extractSalary() {
+    const selectors = [
+      '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
+      '[data-testid*="salary"]', '[class*="compensation"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.trim()) return el.innerText.trim();
+    }
+    // Regex scan for salary patterns in page text
+    const match = (document.body.innerText || '').match(
+      /(₹[\d,]+\s*(?:LPA|lpa|L|k|\/month|per month|stipend)?[\s\-–to]*₹?[\d,]*\s*(?:LPA|lpa|L|k)?)/
+    );
+    return match ? match[1].trim() : '';
   }
+
+  function extractJobType() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('internship')) return 'Internship';
+    if (text.includes('full-time') || text.includes('full time')) return 'Full-Time';
+    if (text.includes('part-time') || text.includes('part time')) return 'Part-Time';
+    if (text.includes('contract')) return 'Contract';
+    if (text.includes('freelance')) return 'Freelance';
+    return '';
+  }
+
+  function extractWorkMode() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('work from home') || text.includes('remote')) return 'Remote';
+    if (text.includes('hybrid')) return 'Hybrid';
+    return 'On-site';
+  }
+
 
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
-  let lastHandledAt = 0;
-  const REARM_COOLDOWN_MS = 8000;
-
-  function isRecentlyHandled() {
-    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
-  }
-
-  function markHandled() {
-    lastHandledUrl = normalizedUrl();
-    lastHandledAt = Date.now();
-  }
-
-  // SPA-style portals often mutate query strings/hash on internal
-  // navigation without a real reload - comparing origin+pathname only
-  // avoids false re-triggers from those irrelevant URL changes.
-  function normalizedUrl() {
-    return window.location.origin + window.location.pathname;
-  }
-  const PENDING_KEY = 'appliedin_pending_application';
+  // FIX BUG 2: Use a tab-unique pending key so two tabs (e.g. LinkedIn + Naukri)
+  // never overwrite each other's cached job data.
+  // performance.now() gives microsecond precision unique to each tab's page load.
+  const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
   // LinkedIn's tab title reliably follows "Job Title | Company | LinkedIn"
@@ -54,27 +64,23 @@
 
   function getJobDetails() {
     try {
-      const structured = window.__appliedinCommon?.getStructuredJobData?.();
       const tabTitle = getDetailsFromTabTitle();
 
       const title =
-        structured?.title ||
         document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
         document.querySelector('h1.t-24')?.innerText?.trim() ||
-        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
+        document.querySelector('h1')?.innerText?.trim() ||
         tabTitle.role ||
         'Unknown Role';
 
       const company =
-        structured?.company ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim()) ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim()) ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('a[href*="/company/"]')?.innerText?.trim()) ||
+        document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
+        document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
+        document.querySelector('a[href*="/company/"]')?.innerText?.trim() ||
         tabTitle.company ||
         'Unknown Company';
 
       const location =
-        structured?.location ||
         document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() ||
         'Unknown Location';
 
@@ -82,6 +88,9 @@
         company,
         role: title,
         location,
+        salary: extractSalary(),
+        jobType: extractJobType(),
+        workMode: extractWorkMode(),
         platform: 'LinkedIn',
         url: window.location.href,
         date: new Date().toISOString(),
@@ -117,9 +126,7 @@
     'application submitted',
     'you\'ve applied',
     'application was sent to',
-    'successfully applied',
-    'has been submitted',
-    'has been received'
+    'successfully applied'
   ];
 
   function cachePendingJob(jobData) {
@@ -148,27 +155,32 @@
     });
   }
 
+
+  // Guard: if confirm popup already open (user typing), skip — don't interrupt.
+  function isPopupOpen() {
+    return !!document.getElementById('appliedin-confirm');
+  }
   function bodyLooksLikeSuccess() {
     const bodyText = (document.body.innerText || '').toLowerCase();
     return successPhrases.some(p => bodyText.includes(p));
   }
 
   function handleSuccess() {
-    if (isRecentlyHandled()) return;
-    markHandled();
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
       console.log('[AppliedIn] jobData for save:', jobData);
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
           // user answered — this URL stays marked as handled
         });
       } else {
-        lastHandledUrl = null; lastHandledAt = 0;
+        lastHandledUrl = null;
       }
     });
   }
@@ -194,7 +206,7 @@
       text === 'submit' ||
       text === 'done'
     ) {
-      if (isRecentlyHandled()) return;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
@@ -204,24 +216,18 @@
     }
   });
 
-  // Watch for success confirmation message in DOM. Debounced so a page
-  // with lots of incidental mutations (ads, trackers) doesn't trigger a
-  // full-text rescan on every single one.
-  let mutationDebounce = null;
+  // Watch for success confirmation message in DOM
   const observer = new MutationObserver(function () {
-    clearTimeout(mutationDebounce);
-    mutationDebounce = setTimeout(() => {
-      if (isRecentlyHandled()) return;
-      if (bodyLooksLikeSuccess()) {
-        setTimeout(handleSuccess, 1000);
-      }
-    }, 400);
+    if (lastHandledUrl === window.location.href) return;
+    if (isPopupOpen()) return;
+    if (bodyLooksLikeSuccess()) {
+      setTimeout(handleSuccess, 1000);
+    }
   });
 
   observer.observe(document.body, {
     childList: true,
-    subtree: true,
-    characterData: true
+    subtree: true
   });
 
 })();

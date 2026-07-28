@@ -8,38 +8,47 @@
 (function () {
   console.log('[AppliedIn] glassdoor.js loaded on', window.location.href);
 
-  // Chat/messaging pages legitimately contain application-related phrases
-  // in normal conversation — never a real submission confirmation. This
-  // script should not run there at all.
-  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
-  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
-    console.log('[AppliedIn] glassdoor.js: excluded page type, not running');
-    return;
-  }
-
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation on a static "success" page (the success text
   // never disappears, so a boolean flag alone would loop forever).
   let lastHandledUrl = null;
-  let lastHandledAt = 0;
-  const REARM_COOLDOWN_MS = 8000;
 
-  function isRecentlyHandled() {
-    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
+  function extractSalary() {
+    const selectors = [
+      '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
+      '[data-testid*="salary"]', '[class*="compensation"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.trim()) return el.innerText.trim();
+    }
+    const match = (document.body.innerText || '').match(
+      /(₹[\d,]+\s*(?:LPA|lpa|L|k|\/month|per month|stipend)?[\s\-\u2013to]*₹?[\d,]*\s*(?:LPA|lpa|L|k)?)/
+    );
+    return match ? match[1].trim() : '';
   }
 
-  function markHandled() {
-    lastHandledUrl = normalizedUrl();
-    lastHandledAt = Date.now();
+  function extractJobType() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('internship')) return 'Internship';
+    if (text.includes('full-time') || text.includes('full time')) return 'Full-Time';
+    if (text.includes('part-time') || text.includes('part time')) return 'Part-Time';
+    if (text.includes('contract')) return 'Contract';
+    if (text.includes('freelance')) return 'Freelance';
+    return '';
   }
 
-  // SPA-style portals often mutate query strings/hash on internal
-  // navigation without a real reload - comparing origin+pathname only
-  // avoids false re-triggers from those irrelevant URL changes.
-  function normalizedUrl() {
-    return window.location.origin + window.location.pathname;
+  function extractWorkMode() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('work from home') || text.includes('remote')) return 'Remote';
+    if (text.includes('hybrid')) return 'Hybrid';
+    return 'On-site';
   }
-  const PENDING_KEY = 'appliedin_pending_application';
+
+  // FIX BUG 2: Use a tab-unique pending key so two tabs (e.g. LinkedIn + Naukri)
+  // never overwrite each other's cached job data.
+  // performance.now() gives microsecond precision unique to each tab's page load.
+  const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
 
   const successPhrases = [
     'application submitted',
@@ -47,30 +56,23 @@
     'your application has been sent',
     'you\'ve applied',
     'application complete',
-    'thank you for applying',
-    'has been submitted',
-    'has been received'
+    'thank you for applying'
   ];
 
   function getJobDetails() {
     try {
-      const structured = window.__appliedinCommon?.getStructuredJobData?.();
-
       const title =
-        structured?.title ||
         document.querySelector('[data-test="job-title"]')?.innerText?.trim() ||
         document.querySelector('[class*="jobTitle"]')?.innerText?.trim() ||
-        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
+        document.querySelector('h1')?.innerText?.trim() ||
         'Unknown Role';
 
       const company =
-        structured?.company ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[data-test="employer-name"]')?.innerText?.trim()) ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[class*="employerName"]')?.innerText?.trim()) ||
+        document.querySelector('[data-test="employer-name"]')?.innerText?.trim() ||
+        document.querySelector('[class*="employerName"]')?.innerText?.trim() ||
         'Unknown Company';
 
       const location =
-        structured?.location ||
         document.querySelector('[data-test="job-location"]')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
@@ -79,6 +81,9 @@
         company,
         role: title,
         location,
+        salary: extractSalary(),
+        jobType: extractJobType(),
+        workMode: extractWorkMode(),
         platform: 'Glassdoor',
         url: window.location.href,
         date: new Date().toISOString(),
@@ -122,25 +127,35 @@
     });
   }
 
+
+  // Guard: if confirm popup is already open (user is typing), skip auto-save.
+  // This prevents the MutationObserver success trigger from closing the popup
+  // mid-typing when the success message arrives slightly after popup opens.
+  function isPopupOpen() {
+    return !!document.getElementById('appliedin-confirm');
+  }
   function bodyLooksLikeFinalSuccess() {
     const bodyText = (document.body.innerText || '').toLowerCase();
     return successPhrases.some(p => bodyText.includes(p));
   }
 
   function handleFinalSuccess() {
-    if (isRecentlyHandled()) return;
-    markHandled();
+    if (lastHandledUrl === window.location.href) return;
+    // If confirm popup already open, user is typing — don't interrupt.
+    // MutationObserver will not re-fire since lastHandledUrl stays unset
+    // and the popup's own Yes button will save when user is ready.
+    if (isPopupOpen()) return;
+    lastHandledUrl = window.location.href;
 
     const jobData = getJobDetails();
-    if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
+    if (jobData && jobData.company !== 'Unknown Company') {
       saveApplication(jobData);
-    } else if (jobData) {
-      window.__appliedinCommon.showConfirmPopup(jobData, 'Glassdoor', function () {
-        // user answered — this URL stays marked as handled
-      });
     } else {
-      // couldn't read anything — allow a later mutation to retry
-      lastHandledUrl = null; lastHandledAt = 0;
+      window.__appliedinCommon.showConfirmPopup(
+        jobData || { company: '', role: '', platform: 'Glassdoor', url: window.location.href, date: new Date().toISOString(), status: 'Applied' },
+        'Glassdoor',
+        function () {}
+      );
     }
   }
 
@@ -172,47 +187,41 @@
       text.includes('send application');
 
     if (isFinalSubmit) {
-      if (isRecentlyHandled()) return;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
+        if (!bodyLooksLikeFinalSuccess()) return;
+        // If popup already open from an earlier trigger — don't duplicate
+        if (isPopupOpen()) return;
+        if (lastHandledUrl === window.location.href) return;
+        lastHandledUrl = window.location.href;
         const jobData = getJobDetails();
-        const successDetected = bodyLooksLikeFinalSuccess();
-
-        if (!successDetected) return; // not actually done yet — stay silent
-
-        markHandled();
-
-        if (jobData && jobData.company !== 'Unknown Company' && jobData.role !== 'Unknown Role') {
+        if (jobData && jobData.company !== 'Unknown Company') {
           saveApplication(jobData);
         } else {
           window.__appliedinCommon.showConfirmPopup(
             jobData || { company: '', role: '', platform: 'Glassdoor', url: window.location.href, date: new Date().toISOString(), status: 'Applied' },
             'Glassdoor',
-            function () {
-              // user answered — this URL stays marked as handled
-            }
+            function () {}
           );
         }
       }, 2000);
     }
   });
 
-  // METHOD 2 — Watch for success message appearing in the DOM (debounced)
-  let mutationDebounce = null;
+  // METHOD 2 — Watch for success message appearing in the DOM
   const observer = new MutationObserver(function () {
-    clearTimeout(mutationDebounce);
-    mutationDebounce = setTimeout(() => {
-      if (isRecentlyHandled()) return;
-      if (bodyLooksLikeFinalSuccess()) {
-        setTimeout(handleFinalSuccess, 1000);
-      }
-    }, 400);
+    if (lastHandledUrl === window.location.href) return;
+    // Don't close popup mid-typing — user will save manually
+    if (isPopupOpen()) return;
+    if (bodyLooksLikeFinalSuccess()) {
+      setTimeout(handleFinalSuccess, 1000);
+    }
   });
 
   observer.observe(document.body, {
     childList: true,
-    subtree: true,
-    characterData: true
+    subtree: true
   });
 
 })();

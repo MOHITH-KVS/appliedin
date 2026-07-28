@@ -6,57 +6,62 @@
 (function () {
   console.log('[AppliedIn] naukri.js loaded on', window.location.href);
 
-  // Chat/messaging pages legitimately contain application-related phrases
-  // in normal conversation — never a real submission confirmation. This
-  // script should not run there at all.
-  const EXCLUDED_PATH_PATTERNS = ['/chat/', '/message', '/inbox', '/conversation'];
-  if (EXCLUDED_PATH_PATTERNS.some(p => window.location.pathname.toLowerCase().includes(p))) {
-    console.log('[AppliedIn] naukri.js: excluded page type, not running');
-    return;
+  function extractSalary() {
+    const selectors = [
+      '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
+      '[data-testid*="salary"]', '[class*="compensation"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.trim()) return el.innerText.trim();
+    }
+    // Regex scan for salary patterns in page text
+    const match = (document.body.innerText || '').match(
+      /(₹[\d,]+\s*(?:LPA|lpa|L|k|\/month|per month|stipend)?[\s\-–to]*₹?[\d,]*\s*(?:LPA|lpa|L|k)?)/
+    );
+    return match ? match[1].trim() : '';
   }
+
+  function extractJobType() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('internship')) return 'Internship';
+    if (text.includes('full-time') || text.includes('full time')) return 'Full-Time';
+    if (text.includes('part-time') || text.includes('part time')) return 'Part-Time';
+    if (text.includes('contract')) return 'Contract';
+    if (text.includes('freelance')) return 'Freelance';
+    return '';
+  }
+
+  function extractWorkMode() {
+    const text = (document.body.innerText || '').toLowerCase();
+    if (text.includes('work from home') || text.includes('remote')) return 'Remote';
+    if (text.includes('hybrid')) return 'Hybrid';
+    return 'On-site';
+  }
+
 
   let lastHandledUrl = null;
-  let lastHandledAt = 0;
-  const REARM_COOLDOWN_MS = 8000;
-
-  function isRecentlyHandled() {
-    return lastHandledUrl === normalizedUrl() && (Date.now() - lastHandledAt) < REARM_COOLDOWN_MS;
-  }
-
-  function markHandled() {
-    lastHandledUrl = normalizedUrl();
-    lastHandledAt = Date.now();
-  }
-
-  // SPA-style portals often mutate query strings/hash on internal
-  // navigation without a real reload - comparing origin+pathname only
-  // avoids false re-triggers from those irrelevant URL changes.
-  function normalizedUrl() {
-    return window.location.origin + window.location.pathname;
-  }
-  const PENDING_KEY = 'appliedin_pending_application';
+  // FIX BUG 2: Use a tab-unique pending key so two tabs (e.g. LinkedIn + Naukri)
+  // never overwrite each other's cached job data.
+  // performance.now() gives microsecond precision unique to each tab's page load.
+  const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
   function getJobDetails() {
     try {
-      const structured = window.__appliedinCommon?.getStructuredJobData?.();
-
       const title =
-        structured?.title ||
         document.querySelector('.jd-header-title')?.innerText?.trim() ||
         document.querySelector('[class*="job-title"]')?.innerText?.trim() ||
-        window.__appliedinCommon?.cleanAndValidateRole?.(document.querySelector('h1')?.innerText?.trim()) ||
+        document.querySelector('h1')?.innerText?.trim() ||
         'Unknown Role';
 
       const company =
-        structured?.company ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.jd-header-comp-name a')?.innerText?.trim()) ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('.jd-header-comp-name')?.innerText?.trim()) ||
-        window.__appliedinCommon?.cleanAndValidateCompany?.(document.querySelector('[class*="comp-name"]')?.innerText?.trim()) ||
+        document.querySelector('.jd-header-comp-name a')?.innerText?.trim() ||
+        document.querySelector('.jd-header-comp-name')?.innerText?.trim() ||
+        document.querySelector('[class*="comp-name"]')?.innerText?.trim() ||
         'Unknown Company';
 
       const location =
-        structured?.location ||
         document.querySelector('.location')?.innerText?.trim() ||
         document.querySelector('[class*="location"]')?.innerText?.trim() ||
         'Unknown Location';
@@ -65,6 +70,9 @@
         company,
         role: title,
         location,
+        salary: extractSalary(),
+        jobType: extractJobType(),
+        workMode: extractWorkMode(),
         platform: 'Naukri',
         url: window.location.href,
         date: new Date().toISOString(),
@@ -98,9 +106,7 @@
     'successfully applied',
     'you have applied',
     'your application has been submitted',
-    'applied successfully',
-    'has been submitted',
-    'has been received'
+    'applied successfully'
   ];
 
   function cachePendingJob(jobData) {
@@ -129,26 +135,31 @@
     });
   }
 
+
+  // Guard: if confirm popup already open (user typing), skip — don't interrupt.
+  function isPopupOpen() {
+    return !!document.getElementById('appliedin-confirm');
+  }
   function bodyLooksLikeSuccess() {
     const bodyText = (document.body.innerText || '').toLowerCase();
     return successPhrases.some(p => bodyText.includes(p));
   }
 
   function handleSuccess() {
-    if (isRecentlyHandled()) return;
-    markHandled();
+    if (lastHandledUrl === window.location.href) return;
+    lastHandledUrl = window.location.href;
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company' && jobData.role && jobData.role !== 'Unknown Role') {
+      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
         saveApplication(jobData);
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Naukri', function () {
           // user answered — this URL stays marked as handled
         });
       } else {
-        lastHandledUrl = null; lastHandledAt = 0;
+        lastHandledUrl = null;
       }
     });
   }
@@ -172,7 +183,7 @@
       const jobData = getJobDetailsForCaching();
       if (jobData) cachePendingJob(jobData);
 
-      if (isRecentlyHandled()) return;
+      if (lastHandledUrl === window.location.href) return;
 
       setTimeout(() => {
         if (bodyLooksLikeSuccess()) {
@@ -182,23 +193,18 @@
     }
   });
 
-  // METHOD 2 — Watch for success message (debounced to avoid rescanning
-  // the full page text on every incidental DOM mutation)
-  let mutationDebounce = null;
+  // METHOD 2 — Watch for success message
   const observer = new MutationObserver(function () {
-    clearTimeout(mutationDebounce);
-    mutationDebounce = setTimeout(() => {
-      if (isRecentlyHandled()) return;
-      if (bodyLooksLikeSuccess()) {
-        setTimeout(handleSuccess, 1000);
-      }
-    }, 400);
+    if (lastHandledUrl === window.location.href) return;
+    if (isPopupOpen()) return;
+    if (bodyLooksLikeSuccess()) {
+      setTimeout(handleSuccess, 1000);
+    }
   });
 
   observer.observe(document.body, {
     childList: true,
-    subtree: true,
-    characterData: true
+    subtree: true
   });
 
 })();
