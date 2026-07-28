@@ -7,6 +7,7 @@
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
+  let observerActive = true; // set false once popup opens — locks popup open
 
   function extractSalary() {
     const selectors = [
@@ -116,7 +117,9 @@
     } else if (jobData) {
       window.__appliedinCommon.showConfirmPopup(jobData, 'Internshala', function () {
         // user answered — this URL stays marked as handled
-      });
+      },
+          function () { observerActive = false; } // lock popup open
+        );
     } else {
       lastHandledUrl = null;
     }
@@ -147,8 +150,8 @@
 
   // METHOD 2 — Watch for success message
   const observer = new MutationObserver(function () {
+    if (!observerActive) return; // popup open — locked, don't interfere
     if (lastHandledUrl === window.location.href) return;
-    if (isPopupOpen()) return;
     if (bodyLooksLikeSuccess()) {
       setTimeout(handleSuccess, 1000);
     }

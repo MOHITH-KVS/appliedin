@@ -10,6 +10,7 @@
   console.log('[AppliedIn] indeed.js loaded on', window.location.href);
 
   let lastHandledUrl = null;
+  let observerActive = true; // set false once popup opens — locks popup open
 
   function extractSalary() {
     const selectors = [
@@ -178,7 +179,9 @@
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Indeed', function () {
           // user answered (Yes or No) — this URL stays marked as handled
-        });
+        },
+          function () { observerActive = false; } // lock popup open
+        );
       } else {
         // couldn't read anything — allow a later mutation to retry
         lastHandledUrl = null;

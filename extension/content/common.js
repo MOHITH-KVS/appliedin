@@ -75,7 +75,7 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
   // the caller is responsible for marking the URL as handled BEFORE
   // calling this — so even if the user dismisses it (overlay click, No),
   // the URL stays handled and the popup never re-appears.
-  function showConfirmPopup(defaultData, platformName, onDone) {
+  function showConfirmPopup(defaultData, platformName, onDone, onOpen) {
     // Guard: if popup already open, don't open another one
     const existingPopup = document.getElementById('appliedin-confirm');
     if (existingPopup) return;
@@ -154,6 +154,8 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
 
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
+    // Notify caller popup is open — caller can disconnect its observer here
+    if (onOpen) onOpen();
 
     function closePopup() {
       overlay.remove();

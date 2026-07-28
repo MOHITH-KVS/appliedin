@@ -137,6 +137,7 @@ function injectUniversalTracker(platformName) {
   // kept re-triggering. Now once a URL is handled (popup shown OR saved),
   // it NEVER shows again in this tab session.
   const handledUrls = new Set();
+  let observerActive = true; // false once popup opens — locks it
 
   const submitTexts = [
     'submit application',
@@ -287,8 +288,8 @@ function injectUniversalTracker(platformName) {
     if (!isSubmitButton) return;
 
     setTimeout(() => {
+      if (!observerActive) return; // popup locked
       if (handledUrls.has(window.location.href)) return;
-      if (isPopupOpen()) return; // user already filling popup
 
       const bodyText = document.body.innerText || '';
       const isConfirmed = successPhrases.some(phrase =>
@@ -301,7 +302,10 @@ function injectUniversalTracker(platformName) {
         // FIX BUG 1: if ambiguous domain, always ask user even if success detected
         if (isAmbiguousDomain()) {
           const jobData = getPageDetails();
-          showConfirmPopup(jobData, true); // true = success already confirmed, just need company name
+          showConfirmPopup(jobData, true,
+            function () { handledUrls.add(window.location.href); }, // onDone
+            function () { observerActive = false; }                  // onOpen
+          );
         } else {
           const jobData = getPageDetails();
           if (jobData) saveApplication(jobData);
@@ -316,8 +320,8 @@ function injectUniversalTracker(platformName) {
   // METHOD 2 — Watch DOM for success confirmation message
   const observer = new MutationObserver(function () {
     // FIX BUG 2: check the Set
+    if (!observerActive) return; // popup locked open
     if (handledUrls.has(window.location.href)) return;
-    if (isPopupOpen()) return; // user typing — don't interrupt
 
     const bodyText = document.body.innerText || '';
     const isConfirmed = successPhrases.some(phrase =>
@@ -351,7 +355,7 @@ function injectUniversalTracker(platformName) {
   // FIX BUG 1: alreadyConfirmed = true means success was detected, we just
   // need the user to fill in the correct company name (Google Forms case).
   // alreadyConfirmed = false means we're uncertain, so we ask "did you apply?"
-  function showConfirmPopup(jobData, alreadyConfirmed) {
+  function showConfirmPopup(jobData, alreadyConfirmed, onDone, onOpen) {
     const existing = document.getElementById('appliedin-confirm');
     if (existing) return; // popup already open, don't duplicate
 
@@ -442,6 +446,7 @@ function injectUniversalTracker(platformName) {
 
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
+    if (onOpen) onOpen(); // lock observer
 
     // Auto-focus company field so user can type immediately
     setTimeout(() => {

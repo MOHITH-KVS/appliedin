@@ -9,6 +9,7 @@
   console.log('[AppliedIn] unstop.js loaded on', window.location.href);
 
   let lastHandledUrl = null;
+  let observerActive = true; // set false once popup opens — locks popup open
 
   function extractSalary() {
     const selectors = [
@@ -180,7 +181,9 @@
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'Unstop', function () {
           // user answered — this URL stays marked as handled
-        });
+        },
+          function () { observerActive = false; } // lock popup open
+        );
       } else {
         lastHandledUrl = null;
       }
@@ -227,8 +230,8 @@
 
   // METHOD 2 — Watch for success message appearing in the DOM
   const observer = new MutationObserver(function () {
+    if (!observerActive) return; // popup open — locked, don't interfere
     if (lastHandledUrl === window.location.href) return;
-    if (isPopupOpen()) return;
     if (textLooksLikeSuccess()) {
       setTimeout(handleSuccess, 1000);
     }

@@ -4,6 +4,7 @@
 
 (function () {
   let lastHandledUrl = null;
+  let observerActive = true; // set false once popup opens — locks popup open
 
   function extractSalary() {
     const el =
@@ -83,7 +84,9 @@
     if (jobData && jobData.company !== 'Unknown Company') {
       window.__appliedinCommon.saveApplication(jobData, null, null);
     } else if (jobData) {
-      window.__appliedinCommon.showConfirmPopup(jobData, 'Hirist', null);
+      window.__appliedinCommon.showConfirmPopup(jobData, 'Hirist', null,
+          function () { observerActive = false; } // lock popup open
+        );
     }
   }
 
@@ -97,8 +100,8 @@
   });
 
   const observer = new MutationObserver(function () {
+    if (!observerActive) return; // popup open — locked, don't interfere
     if (lastHandledUrl === window.location.href) return;
-    if (isPopupOpen()) return;
     if (bodyLooksLikeSuccess()) setTimeout(handleSuccess, 1000);
   });
   observer.observe(document.body, { childList: true, subtree: true });

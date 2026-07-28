@@ -45,6 +45,7 @@
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
   let lastHandledUrl = null;
+  let observerActive = true; // set false once popup opens — locks popup open
   // FIX BUG 2: Use a tab-unique pending key so two tabs (e.g. LinkedIn + Naukri)
   // never overwrite each other's cached job data.
   // performance.now() gives microsecond precision unique to each tab's page load.
@@ -178,7 +179,9 @@
       } else if (jobData) {
         window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
           // user answered — this URL stays marked as handled
-        });
+        },
+          function () { observerActive = false; } // lock popup open
+        );
       } else {
         lastHandledUrl = null;
       }
@@ -218,8 +221,8 @@
 
   // Watch for success confirmation message in DOM
   const observer = new MutationObserver(function () {
+    if (!observerActive) return; // popup open — locked, don't interfere
     if (lastHandledUrl === window.location.href) return;
-    if (isPopupOpen()) return;
     if (bodyLooksLikeSuccess()) {
       setTimeout(handleSuccess, 1000);
     }
