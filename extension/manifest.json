@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AppliedIn",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Built for Indian freshers.",
   "permissions": [
     "storage",
@@ -23,7 +23,26 @@
     "https://cutshort.io/*",
     "https://www.shine.com/*",
     "https://www.foundit.in/*",
-    "https://www.freshersworld.com/*"
+    "https://www.freshersworld.com/*",
+    "https://docs.google.com/*",
+    "https://forms.google.com/*",
+    "https://forms.gle/*",
+    "https://*.typeform.com/*",
+    "https://*.jotform.com/*",
+    "https://*.zohorecruit.com/*",
+    "https://*.zoho.com/*",
+    "https://*.darwinbox.com/*",
+    "https://*.keka.com/*",
+    "https://*.bamboohr.com/*",
+    "https://forms.microsoft.com/*",
+    "https://*.workday.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.taleo.net/*",
+    "https://*.icims.com/*",
+    "https://*.airtable.com/*"
   ],
   "background": {
     "service_worker": "background.js"

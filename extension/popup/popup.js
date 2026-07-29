@@ -7,19 +7,16 @@ document.addEventListener('DOMContentLoaded', function () {
   let currentSearch = '';
   let currentExportType = ''; // 'csv' or 'excel'
 
-  // ── Load Applications — FIX BUG 1: reads from IndexedDB ──
+  // ── Load Applications ──
   function loadApplications() {
-    AppliedInDB.getAll(function (apps) {
-      allApplications = apps;
+    chrome.storage.local.get(['applications'], function (result) {
+      allApplications = result.applications || [];
       updateStats();
       renderApplications();
     });
   }
 
-  // Run migration on first open (moves old chrome.storage.local data to IndexedDB)
-  AppliedInDB.migrateFromLocalStorage(function () {
-    loadApplications();
-  });
+  loadApplications();
 
   // ── Update Stats ──
   function updateStats() {
@@ -179,12 +176,12 @@ document.addEventListener('DOMContentLoaded', function () {
       list.appendChild(card);
     });
 
-    // Status change — FIX BUG 1: update via IndexedDB using record id
+    // Status change
     document.querySelectorAll('.status-select').forEach(function (select) {
       select.addEventListener('change', function () {
         const idx = parseInt(this.dataset.index);
-        const app = allApplications[idx];
-        AppliedInDB.update(app.id, { status: this.value }, loadApplications);
+        allApplications[idx].status = this.value;
+        chrome.storage.local.set({ applications: allApplications }, loadApplications);
       });
     });
 
@@ -229,9 +226,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
         confirmRow.querySelector('.confirm-yes').addEventListener('click', function(e) {
           e.stopPropagation();
-          // FIX BUG 1: delete from IndexedDB by record id
-          const app = allApplications[idx];
-          AppliedInDB.remove(app.id, loadApplications);
+          allApplications.splice(idx, 1);
+          chrome.storage.local.set({ applications: allApplications }, loadApplications);
         });
         confirmRow.querySelector('.confirm-no').addEventListener('click', function(e) {
           e.stopPropagation();
@@ -312,8 +308,8 @@ document.addEventListener('DOMContentLoaded', function () {
       status
     };
 
-    // FIX BUG 1: save to IndexedDB
-    AppliedInDB.add(newApp, function () {
+    allApplications.unshift(newApp);
+    chrome.storage.local.set({ applications: allApplications }, function () {
       closeModal();
       loadApplications();
     });
@@ -497,6 +493,5 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // ── Initial Load ──
-  // Note: loadApplications() is now called inside migrateFromLocalStorage()
-  // above, so existing users' data is migrated on first open automatically.
+  // loadApplications() already called above
 });

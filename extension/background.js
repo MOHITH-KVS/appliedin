@@ -98,17 +98,53 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   const isCovered = coveredPortals.some(portal => url.includes(portal));
   if (isCovered) return;
 
-  // Check if this looks like a job related page
-  const jobKeywords = [
-    'career', 'careers', 'jobs', 'job', 'apply',
-    'application', 'hiring', 'vacancy', 'vacancies',
-    'opening', 'openings', 'recruitment', 'work-with-us',
-    'join-us', 'join-our-team', 'opportunities', 'workday',
-    'greenhouse', 'lever', 'taleo', 'icims', 'smartrecruiters'
+  // Always inject on known form/ambiguous domains — they host job application
+  // forms but their URLs never contain job keywords like "careers" or "apply".
+  const alwaysInjectDomains = [
+    'docs.google.com',
+    'forms.google.com',
+    'forms.gle',
+    'typeform.com',
+    'jotform.com',
+    'surveymonkey.com',
+    'airtable.com',
+    'notion.so',
+    'zohorecruit.com',
+    'zoho.com',
+    'freshteam.com',
+    'keka.com',
+    'darwinbox.com',
+    'greythr.com',
+    'bamboohr.com',
+    'forms.microsoft.com',
+    'workday.com',
+    'myworkdayjobs.com',
+    'greenhouse.io',
+    'lever.co',
+    'smartrecruiters.com',
+    'taleo.net',
+    'icims.com',
+    'successfactors.com',
+    'applytojob.com',
+    'recruitcrm.io',
+    'freshteam.com',
   ];
 
-  const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
-  if (!isJobPage) return;
+  const hostname = (() => { try { return new URL(tab.url).hostname.toLowerCase(); } catch(e) { return ''; } })();
+  const isAlwaysInject = alwaysInjectDomains.some(d => hostname.includes(d));
+
+  if (!isAlwaysInject) {
+    // For all other sites, check if URL or page looks job-related
+    const jobKeywords = [
+      'career', 'careers', 'jobs', 'job', 'apply',
+      'application', 'hiring', 'vacancy', 'vacancies',
+      'opening', 'openings', 'recruitment', 'work-with-us',
+      'join-us', 'join-our-team', 'opportunities', 'placement',
+      'internship', 'fresher', 'campus', 'recruit',
+    ];
+    const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
+    if (!isJobPage) return;
+  }
 
   // Inject universal tracker into this page
   chrome.scripting.executeScript({
