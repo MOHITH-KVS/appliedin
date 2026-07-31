@@ -145,7 +145,9 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     'formstack.com', 'wufoo.com',
     // ATS / HRMS platforms (no dedicated script)
     'workday.com', 'myworkdayjobs.com', 'greenhouse.io', 'lever.co',
-    'smartrecruiters.com', 'taleo.net', 'icims.com', 'successfactors.com',
+    'smartrecruiters.com', 'taleo.net', 'icims.com',
+    'successfactors.com', 'sapsf.eu', 'sapsf.com', 'sap.com',
+    'career.sap', 'jobs.sap',
     'zohorecruit.com', 'freshteam.com', 'keka.com', 'darwinbox.com',
     'recruitcrm.io', 'bamboohr.com', 'applytojob.com',
     'springrecruit.com', 'hirecraft.in',
@@ -158,16 +160,27 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   const isJobDomain = JOB_DOMAINS.some(d => hostname.includes(d));
 
   if (!isJobDomain) {
-    // TIER 3 — Conditionally inject: only if URL path contains job keywords
+    // TIER 3 — Conditionally inject: URL path OR query string contains job keywords
     const jobKeywords = [
       '/career', '/careers', '/jobs', '/job/', '/apply',
       '/application', '/hiring', '/vacancy', '/vacancies',
       '/openings', '/opening/', '/recruitment', '/work-with-us',
       '/join-us', '/join-our-team', '/opportunities', '/internship',
+      '/portalcareer', '/jobdetail', '/jobapply', '/joboffer',
+      '/talent', '/requisition', '/position',
     ];
-    const urlPath = (() => { try { return new URL(tab.url).pathname.toLowerCase(); } catch(e){ return ''; } })();
-    const isJobPage = jobKeywords.some(kw => urlPath.includes(kw));
-    if (!isJobPage) return;
+    const urlFull = tab.url.toLowerCase();
+    // Check both path and full URL (catches query params like ?portalcareer, ?isQuickApply)
+    const isJobPage = jobKeywords.some(kw => urlFull.includes(kw));
+
+    // TIER 3B — Last resort: inject if URL has job-related query params
+    const jobQueryParams = [
+      'quickapply', 'jobid', 'job_id', 'positionid', 'requisitionid',
+      'careerId', 'applicationid', 'applyredirect',
+    ];
+    const hasJobParam = jobQueryParams.some(p => urlFull.includes(p.toLowerCase()));
+
+    if (!isJobPage && !hasJobParam) return;
   }
 
   // Inject universal tracker into this page
@@ -715,3 +728,212 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
   return true; // keep message channel open for async response
 });
+
+// ══════════════════════════════════════════════════════════════
+// GUARANTEE LAYER — runs on EVERY page (except hard-blocked ones)
+// Scans for success phrases on page load.
+// If found and not already saved → injects a minimal popup.
+// This ensures zero silent misses even for unknown domains/ATS.
+// ══════════════════════════════════════════════════════════════
+
+const HARD_BLOCKED = [
+  'mail.google.com', 'outlook.live.com', 'mail.yahoo.com',
+  'youtube.com', 'netflix.com', 'facebook.com', 'instagram.com',
+  'twitter.com', 'x.com', 'reddit.com', 'discord.com',
+  'amazon.in', 'amazon.com', 'flipkart.com', 'swiggy.com', 'zomato.com',
+  'sbi.co.in', 'hdfcbank.com', 'icicibank.com', 'paytm.com', 'phonepe.com',
+  'github.com', 'stackoverflow.com', 'leetcode.com', 'geeksforgeeks.org',
+  'udemy.com', 'coursera.org', 'docs.google.com', 'drive.google.com',
+  'google.com', 'bing.com', 'duckduckgo.com', 'maps.google.com',
+  'translate.google.com', 'play.google.com', 'accounts.google.com',
+  'chrome.google.com', 'web.whatsapp.com', 'web.telegram.org',
+];
+
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab.url) return;
+
+  const url = tab.url.toLowerCase();
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') ||
+      url.startsWith('about:') || url.startsWith('edge://')) return;
+
+  try {
+    const hostname = new URL(tab.url).hostname.toLowerCase();
+    if (HARD_BLOCKED.some(d => hostname.includes(d))) return;
+  } catch(e) { return; }
+
+  // Inject the guarantee scanner
+  chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: guaranteeScanner,
+  }).catch(() => {});
+});
+
+function guaranteeScanner() {
+  // Don't run if already handled by main tracker or dedicated script
+  if (window.__appliedinHandled || window.__appliedinInjected) return;
+
+  // Skip non-apply paths
+  const path = window.location.pathname.toLowerCase();
+  const skipPaths = [
+    '/chat', '/messages', '/messaging', '/inbox', '/notifications',
+    '/dashboard', '/profile', '/account', '/settings', '/feed',
+    '/mynetwork', '/learning', '/salary', '/reviews', '/community',
+    '/my-applications', '/saved', '/wishlist', '/cart',
+    '/', // home pages
+  ];
+  if (skipPaths.some(p => path === p || path.startsWith(p + '/'))) return;
+
+  const SUCCESS_PHRASES = [
+    'your application has been sent',
+    'your application has been submitted',
+    'application submitted successfully',
+    'successfully applied',
+    'you have successfully applied',
+    'application received',
+    'we have received your application',
+    'we have received your submission',
+    'your submission has been received',
+    'thank you for applying',
+    'thank you for your application',
+    'thanks for applying',
+    'thanks for submitting',
+    'your response has been recorded',
+    'application sent. thank you',
+    'your application has been sent. thank you',
+  ];
+
+  const bodyText = (document.body?.innerText || '').toLowerCase();
+  const isSuccess = SUCCESS_PHRASES.some(p => bodyText.includes(p));
+  if (!isSuccess) return;
+
+  // Success detected — mark so main tracker doesn't double-fire
+  window.__appliedinHandled = true;
+
+  // Extract company from page
+  function getCompany() {
+    const meta = document.querySelector('meta[property="og:site_name"]')?.content?.trim();
+    if (meta && meta.length < 60) return meta;
+    const host = window.location.hostname.replace(/^(www|careers|jobs|apply|talent)\./i,'').split('.')[0];
+    return host ? host.charAt(0).toUpperCase() + host.slice(1) : '';
+  }
+
+  function getRole() {
+    const noiseWords = ['thank','applied','application','received','submitted','congratulations','welcome','success'];
+    const candidates = [...document.querySelectorAll('h1,h2,[class*="job-title"],[class*="position"]')];
+    for (const el of candidates) {
+      const t = el.innerText?.trim() || '';
+      if (t.length < 80 && !noiseWords.some(w => t.toLowerCase().includes(w))) return t;
+    }
+    const title = document.title?.replace(/[-|–].*$/,'').trim() || '';
+    if (title.length < 80 && !noiseWords.some(w => title.toLowerCase().includes(w))) return title;
+    return '';
+  }
+
+  const company = getCompany();
+  const role    = getRole();
+
+  // Build and show popup
+  if (document.getElementById('appliedin-confirm')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'appliedin-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999998;font-family:-apple-system,sans-serif;';
+
+  const popup = document.createElement('div');
+  popup.id = 'appliedin-confirm';
+  popup.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:420px;max-width:90vw;background:white;border-radius:16px;padding:28px;
+    box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:999999;border:1px solid #e5e7eb;`;
+
+  popup.innerHTML = `
+    <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:6px;">📋 AppliedIn</div>
+    <div style="font-size:14px;color:#22c55e;font-weight:600;margin-bottom:16px;">
+      ✅ Application submitted detected!
+    </div>
+    <div style="font-size:13px;color:#6b7280;margin-bottom:16px;">
+      Confirm details to save this application.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:3px;">Company</label>
+        <input id="ai-company" value="${(company||'').replace(/"/g,'')}"
+          placeholder="Enter company name"
+          style="width:100%;box-sizing:border-box;padding:9px 12px;border:2px solid ${company?'#e5e7eb':'#ef4444'};
+          border-radius:8px;font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
+        ${!company ? '<div style="font-size:11px;color:#ef4444;margin-top:3px;">⚠️ Could not detect — please type it</div>' : ''}
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:3px;">Job Role</label>
+        <input id="ai-role" value="${(role||'').replace(/"/g,'').substring(0,80)}"
+          placeholder="Enter job role"
+          style="width:100%;box-sizing:border-box;padding:9px 12px;border:2px solid ${role?'#e5e7eb':'#ef4444'};
+          border-radius:8px;font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
+        ${!role ? '<div style="font-size:11px;color:#ef4444;margin-top:3px;">⚠️ Could not detect — please type it</div>' : ''}
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button id="ai-save" style="flex:1;padding:12px;background:#22c55e;color:white;
+        border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
+        ✅ Save Application
+      </button>
+      <button id="ai-skip" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;
+        border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
+        Skip
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(popup);
+
+  // Focus first empty field
+  setTimeout(() => {
+    const c = document.getElementById('ai-company');
+    const r = document.getElementById('ai-role');
+    ((!c.value || !c.value.trim()) ? c : (!r.value || !r.value.trim()) ? r : c).focus();
+  }, 100);
+
+  function closePopup() {
+    overlay.remove();
+    popup.remove();
+  }
+
+  document.getElementById('ai-save').addEventListener('click', function() {
+    const finalCompany = document.getElementById('ai-company').value.trim();
+    const finalRole    = document.getElementById('ai-role').value.trim();
+
+    if (!finalCompany) {
+      document.getElementById('ai-company').style.border = '2px solid #ef4444';
+      document.getElementById('ai-company').focus();
+      return;
+    }
+    if (!finalRole) {
+      document.getElementById('ai-role').style.border = '2px solid #ef4444';
+      document.getElementById('ai-role').focus();
+      return;
+    }
+
+    closePopup();
+
+    const jobData = {
+      company: finalCompany, role: finalRole,
+      location: 'Unknown Location', platform: 'Company Website',
+      url: window.location.href, date: new Date().toISOString(), status: 'Applied'
+    };
+
+    chrome.runtime.sendMessage({ type: 'SAVE_APPLICATION', data: jobData }, function(res) {
+      const toast = document.createElement('div');
+      toast.style.cssText = `position:fixed;bottom:24px;right:24px;padding:12px 20px;
+        border-radius:8px;font-size:14px;font-weight:500;z-index:999999;
+        background:${res&&res.duplicate?'#f59e0b':'#22c55e'};color:white;
+        box-shadow:0 4px 12px rgba(0,0,0,0.15);font-family:-apple-system,sans-serif;`;
+      toast.innerText = res&&res.duplicate ? '⚠️ Already applied here recently!' : '✅ Saved — ' + finalCompany;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    });
+  });
+
+  document.getElementById('ai-skip').addEventListener('click', closePopup);
+  overlay.addEventListener('click', closePopup);
+}
