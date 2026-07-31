@@ -7,11 +7,32 @@
 // cached data once we see a genuine completion signal.
 
 (function () {
+  // PATH GUARD: don't track on non-apply pages of this portal
+  const _blockedPaths = ['/account', '/prefs', '/notifications', '/messages', '/resume'];
+  const _currentPath = window.location.pathname.toLowerCase();
+  if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
+
   console.log('[AppliedIn] indeed.js loaded on', window.location.href);
 
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
 
+
+  // Validate that extracted text is actually a job role/company name
+  // and not a success message or page noise
+  const NOISE_WORDS = [
+    'thank you', 'thanks for', 'successfully applied', 'application submitted',
+    'you have applied', 'we have received', 'your application',
+    'congratulations', 'we will be in touch', 'your submission',
+  ];
+
+  function isCleanText(text) {
+    if (!text || text.length > 80) return false;
+    const lower = text.toLowerCase();
+    if (NOISE_WORDS.some(w => lower.includes(w))) return false;
+    if (/[.!?]$/.test(text.trim())) return false;
+    return true;
+  }
   function extractSalary() {
     const selectors = [
       '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',

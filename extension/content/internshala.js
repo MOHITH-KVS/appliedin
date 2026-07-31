@@ -2,6 +2,11 @@
 // Captures ONLY on submission confirmation
 
 (function () {
+  // PATH GUARD: don't track on non-apply pages of this portal
+  const _blockedPaths = ['/chat', '/dashboard', '/my-profile', '/student/view_applications', '/message', '/notification', '/feed', '/course', '/training'];
+  const _currentPath = window.location.pathname.toLowerCase();
+  if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
+
   console.log('[AppliedIn] internshala.js loaded on', window.location.href);
 
   // Tracks the URL we already handled — prevents re-asking on every
@@ -9,6 +14,22 @@
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
 
+
+  // Validate that extracted text is actually a job role/company name
+  // and not a success message or page noise
+  const NOISE_WORDS = [
+    'thank you', 'thanks for', 'successfully applied', 'application submitted',
+    'you have applied', 'we have received', 'your application',
+    'congratulations', 'we will be in touch', 'your submission',
+  ];
+
+  function isCleanText(text) {
+    if (!text || text.length > 80) return false;
+    const lower = text.toLowerCase();
+    if (NOISE_WORDS.some(w => lower.includes(w))) return false;
+    if (/[.!?]$/.test(text.trim())) return false;
+    return true;
+  }
   function extractSalary() {
     const selectors = [
       '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
@@ -102,6 +123,27 @@
     return !!document.getElementById('appliedin-confirm');
   }
   function bodyLooksLikeSuccess() {
+    // First try targeted selectors — Internshala shows success in a modal or alert
+    const confirmationSelectors = [
+      '.success-message', '.application-success', '[class*="success"]',
+      '.modal-body', '.alert-success', '[class*="confirmation"]',
+      '.thank-you', '[class*="thankyou"]', '.applied-success'
+    ];
+
+    for (const sel of confirmationSelectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText) {
+        const text = el.innerText.toLowerCase();
+        if (successPhrases.some(p => text.includes(p))) return true;
+      }
+    }
+
+    // Fallback: check full body BUT only if URL looks like a post-apply page
+    const path = window.location.pathname.toLowerCase();
+    const isApplyPath = path.includes('/apply') || path.includes('/internship/detail')
+                     || path.includes('/job/detail');
+    if (!isApplyPath) return false;
+
     const bodyText = (document.body.innerText || '').toLowerCase();
     return successPhrases.some(p => bodyText.includes(p));
   }
@@ -118,7 +160,7 @@
       window.__appliedinCommon.showConfirmPopup(jobData, 'Internshala', function () {
         // user answered — this URL stays marked as handled
       },
-          function () { observerActive = false; } // lock popup open
+          function () { observerActive = false; } // lock popup open (reset on close)
         );
     } else {
       lastHandledUrl = null;
@@ -161,5 +203,16 @@
     childList: true,
     subtree: true
   });
+
+
+  // Check immediately on script load — handles redirect-based success pages
+  // where the success message is already in DOM when our script injects
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(function() {
+      if (typeof bodyLooksLikeSuccess === 'function' && bodyLooksLikeSuccess()) {
+        if (typeof handleSuccess === 'function') handleSuccess();
+      }
+    }, 500);
+  }
 
 })();

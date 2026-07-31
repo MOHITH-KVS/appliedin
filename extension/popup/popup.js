@@ -144,7 +144,10 @@ document.addEventListener('DOMContentLoaded', function () {
       card.innerHTML = `
         <div class="app-card-top">
           <div class="app-company">${escapeHtml(app.company)}</div>
-          <button class="btn-delete" data-index="${realIndex}">🗑</button>
+          <div class="card-actions">
+            <button class="btn-edit" data-index="${realIndex}" title="Edit">✏️</button>
+            <button class="btn-delete" data-index="${realIndex}" title="Delete">🗑</button>
+          </div>
         </div>
         <div class="app-role" title="${escapeHtml(app.role)}">${escapeHtml(app.role)}</div>
         ${tagsHtml}
@@ -168,7 +171,9 @@ document.addEventListener('DOMContentLoaded', function () {
       card.addEventListener('click', function (e) {
         if (
           e.target.classList.contains('btn-delete') ||
-          e.target.classList.contains('status-select')
+          e.target.classList.contains('btn-edit') ||
+          e.target.classList.contains('status-select') ||
+          e.target.closest('.delete-confirm-row')
         ) return;
         if (app.url) chrome.tabs.create({ url: app.url });
       });
@@ -182,6 +187,82 @@ document.addEventListener('DOMContentLoaded', function () {
         const idx = parseInt(this.dataset.index);
         allApplications[idx].status = this.value;
         chrome.storage.local.set({ applications: allApplications }, loadApplications);
+      });
+    });
+
+    // ── Edit button — opens inline edit form ──
+    document.querySelectorAll('.btn-edit').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const idx = parseInt(this.dataset.index);
+        const app = allApplications[idx];
+        const card = this.closest('.app-card');
+
+        // Toggle: if edit form already open, close it
+        const existing = card.querySelector('.edit-form-row');
+        if (existing) { existing.remove(); return; }
+
+        // Remove any open delete confirms first
+        const delRow = card.querySelector('.delete-confirm-row');
+        if (delRow) delRow.remove();
+
+        const editRow = document.createElement('div');
+        editRow.className = 'edit-form-row';
+        editRow.style.cssText = `
+          padding: 10px 0 4px 0;
+          border-top: 1px solid #e0e7ff;
+          margin-top: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        `;
+        editRow.innerHTML = `
+          <input class="edit-company" value="${escapeHtml(app.company)}"
+            placeholder="Company name"
+            style="padding:7px 10px;border:1.5px solid #c7d7ff;border-radius:8px;
+            font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
+          <input class="edit-role" value="${escapeHtml(app.role)}"
+            placeholder="Job role"
+            style="padding:7px 10px;border:1.5px solid #c7d7ff;border-radius:8px;
+            font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
+          <input class="edit-salary" value="${escapeHtml(app.salary || '')}"
+            placeholder="Salary / Stipend (optional)"
+            style="padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:8px;
+            font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
+          <div style="display:flex;gap:6px;">
+            <button class="edit-save" style="flex:1;padding:7px;background:#1A56FF;color:white;
+              border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+              ✅ Save
+            </button>
+            <button class="edit-cancel" style="flex:1;padding:7px;background:#f3f4f6;color:#374151;
+              border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+              Cancel
+            </button>
+          </div>
+        `;
+
+        card.appendChild(editRow);
+        editRow.querySelector('.edit-company').focus();
+
+        editRow.querySelector('.edit-save').addEventListener('click', function(e) {
+          e.stopPropagation();
+          const newCompany = editRow.querySelector('.edit-company').value.trim();
+          const newRole = editRow.querySelector('.edit-role').value.trim();
+          const newSalary = editRow.querySelector('.edit-salary').value.trim();
+          if (!newCompany || !newRole) {
+            editRow.querySelector('.edit-company').style.border = '1.5px solid #ef4444';
+            return;
+          }
+          allApplications[idx].company = newCompany;
+          allApplications[idx].role = newRole;
+          allApplications[idx].salary = newSalary;
+          chrome.storage.local.set({ applications: allApplications }, loadApplications);
+        });
+
+        editRow.querySelector('.edit-cancel').addEventListener('click', function(e) {
+          e.stopPropagation();
+          editRow.remove();
+        });
       });
     });
 

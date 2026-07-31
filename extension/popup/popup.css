@@ -497,3 +497,51 @@ body {
   color: #9333ea;
   border: 1px solid #e9d5ff;
 }
+
+/* ── Card action buttons (edit + delete) ── */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn-edit {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 3px 5px;
+  border-radius: 6px;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+  line-height: 1;
+}
+
+.btn-edit:hover {
+  opacity: 1;
+  background: #eff6ff;
+}
+
+.btn-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 3px 5px;
+  border-radius: 6px;
+  opacity: 0.4;
+  transition: opacity 0.15s, background 0.15s;
+  line-height: 1;
+}
+
+.btn-delete:hover {
+  opacity: 1;
+  background: #fff1f2;
+}
+
+/* ── Edit form row ── */
+.edit-form-row input:focus {
+  border-color: #1A56FF !important;
+  box-shadow: 0 0 0 2px rgba(26,86,255,0.1);
+}

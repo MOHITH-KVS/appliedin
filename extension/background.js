@@ -84,65 +84,89 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     url.startsWith('edge://')
   ) return;
 
-  // Skip already covered portals — they handle themselves
+  // Skip portals with dedicated content scripts — they handle themselves
+  // Universal tracker must NOT inject on these to avoid double-firing
   const coveredPortals = [
-    'linkedin.com',
-    'naukri.com',
-    'internshala.com',
-    'indeed.com',
-    'glassdoor.com',
-    'glassdoor.co.in',
-    'unstop.com'
+    'linkedin.com', 'naukri.com', 'internshala.com',
+    'indeed.com', 'glassdoor.com', 'glassdoor.co.in',
+    'unstop.com', 'shine.com', 'foundit.in',
+    'freshersworld.com', 'hirist.tech', 'hirist.com',
+    'cutshort.io', 'monster.com', 'monsterindia.com',
   ];
 
   const isCovered = coveredPortals.some(portal => url.includes(portal));
   if (isCovered) return;
 
-  // Always inject on known form/ambiguous domains — they host job application
-  // forms but their URLs never contain job keywords like "careers" or "apply".
-  const alwaysInjectDomains = [
-    'docs.google.com',
-    'forms.google.com',
-    'forms.gle',
-    'typeform.com',
-    'jotform.com',
-    'surveymonkey.com',
-    'airtable.com',
-    'notion.so',
-    'zohorecruit.com',
-    'zoho.com',
-    'freshteam.com',
-    'keka.com',
-    'darwinbox.com',
-    'greythr.com',
-    'bamboohr.com',
-    'forms.microsoft.com',
-    'workday.com',
-    'myworkdayjobs.com',
-    'greenhouse.io',
-    'lever.co',
-    'smartrecruiters.com',
-    'taleo.net',
-    'icims.com',
-    'successfactors.com',
-    'applytojob.com',
-    'recruitcrm.io',
-    'freshteam.com',
+
+  const hostname = (() => { try { return new URL(tab.url).hostname.toLowerCase(); } catch(e){ return ''; } })();
+
+  // TIER 1 — Hard block: never inject on these domains no matter what.
+  // These are non-job sites where false positives cause bad saves (Gmail, YouTube etc.)
+  const BLOCKED_DOMAINS = [
+    // Email
+    'mail.google.com', 'outlook.live.com', 'outlook.office.com',
+    'mail.yahoo.com', 'protonmail.com', 'zoho.com/mail',
+    // Social
+    'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+    'reddit.com', 'quora.com', 'discord.com', 'telegram.org',
+    'whatsapp.com', 'snapchat.com', 'pinterest.com',
+    // Video / Entertainment
+    'youtube.com', 'netflix.com', 'hotstar.com', 'primevideo.com',
+    'spotify.com', 'twitch.tv',
+    // News
+    'news.google.com', 'timesofindia.com', 'ndtv.com', 'thehindu.com',
+    'hindustantimes.com', 'bbc.com', 'cnn.com',
+    // Shopping
+    'amazon.in', 'amazon.com', 'flipkart.com', 'myntra.com',
+    'meesho.com', 'snapdeal.com', 'nykaa.com', 'swiggy.com', 'zomato.com',
+    // Banking / Finance (sensitive)
+    'sbi.co.in', 'hdfcbank.com', 'icicibank.com', 'axisbank.com',
+    'paytm.com', 'phonepe.com', 'gpay.app', 'razorpay.com',
+    // Dev / Learning (not job apply)
+    'github.com', 'stackoverflow.com', 'leetcode.com', 'hackerrank.com',
+    'geeksforgeeks.org', 'udemy.com', 'coursera.org',
+    // Docs / Productivity
+    'docs.google.com', 'drive.google.com', 'sheets.google.com',
+    'notion.so', 'trello.com', 'slack.com', 'teams.microsoft.com',
+    // Search
+    'google.com', 'bing.com', 'duckduckgo.com',
   ];
 
-  const hostname = (() => { try { return new URL(tab.url).hostname.toLowerCase(); } catch(e) { return ''; } })();
-  const isAlwaysInject = alwaysInjectDomains.some(d => hostname.includes(d));
+  if (BLOCKED_DOMAINS.some(d => hostname.includes(d))) return;
 
-  if (!isAlwaysInject) {
-    // For all other sites, check if URL or page looks job-related
+  // TIER 2 — Always inject on form tools and ATS systems
+  // NOTE: Portals with dedicated content scripts (linkedin, naukri, internshala etc.)
+  // are NOT listed here — they are already skipped by coveredPortals above.
+  // Only list domains that have NO dedicated script and need universal tracker.
+  const JOB_DOMAINS = [
+    // Form tools used by Indian companies for job applications
+    'binary.so', 'typeform.com', 'jotform.com', 'tally.so',
+    'forms.app', 'fillout.com', 'paperform.co', 'cognitoforms.com',
+    'formstack.com', 'wufoo.com',
+    // ATS / HRMS platforms (no dedicated script)
+    'workday.com', 'myworkdayjobs.com', 'greenhouse.io', 'lever.co',
+    'smartrecruiters.com', 'taleo.net', 'icims.com', 'successfactors.com',
+    'zohorecruit.com', 'freshteam.com', 'keka.com', 'darwinbox.com',
+    'recruitcrm.io', 'bamboohr.com', 'applytojob.com',
+    'springrecruit.com', 'hirecraft.in',
+    // Known company career portals (no dedicated script)
+    'careers.google.com', 'amazon.jobs',
+    'wellfound.com', 'angel.co',
+    'apna.co', 'workindia.in', 'iimjobs.com',
+  ];
+
+  const isJobDomain = JOB_DOMAINS.some(d => hostname.includes(d));
+
+  if (!isJobDomain) {
+    // TIER 3 — Conditionally inject: only if URL path contains job keywords
     const jobKeywords = [
-      'career', 'careers', 'jobs', 'job', 'apply',
-      'application', 'hiring', 'vacancy', 'vacancies',
-      'opening', 'openings', 'recruitment', 'work-with-us',
-      'join-us', 'join-our-team', 'opportunities', 'placement',
-      'internship', 'fresher', 'campus', 'recruit',
+      '/career', '/careers', '/jobs', '/job/', '/apply',
+      '/application', '/hiring', '/vacancy', '/vacancies',
+      '/openings', '/opening/', '/recruitment', '/work-with-us',
+      '/join-us', '/join-our-team', '/opportunities', '/internship',
     ];
-    const isJobPage = jobKeywords.some(keyword => url.includes(keyword));
+    const urlPath = (() => { try { return new URL(tab.url).pathname.toLowerCase(); } catch(e){ return ''; } })();
+    const isJobPage = jobKeywords.some(kw => urlPath.includes(kw));
     if (!isJobPage) return;
   }
 
@@ -161,6 +185,18 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 function injectUniversalTracker(platformName) {
   if (window.__appliedinInjected) return;
   window.__appliedinInjected = true;
+
+  // Skip known non-apply paths even on job portals
+  const _path = window.location.pathname.toLowerCase();
+  const _skipPaths = [
+    '/chat', '/messages', '/messaging', '/inbox',
+    '/notifications', '/notification',
+    '/dashboard', '/profile', '/account', '/settings',
+    '/feed', '/mynetwork', '/learning',
+    '/salary', '/reviews', '/community',
+    '/my-applications', '/applied', '/saved',
+  ];
+  if (_skipPaths.some(p => _path.startsWith(p))) return;
 
   // Guard: popup already open — don't interrupt user typing
   function isPopupOpen() {
@@ -202,6 +238,9 @@ function injectUniversalTracker(platformName) {
     'thank you for applying',
     'thank you for your application',
     'we have received your application',
+    'we have received your submission',  // binary.so
+    'your submission has been received',
+    'submission received',
     'your resume was sent',
     'application sent successfully',
     'registration successful',
@@ -223,23 +262,28 @@ function injectUniversalTracker(platformName) {
   // For these we skip auto-save and ALWAYS show the confirm popup so the
   // user can type the real company name.
   const ambiguousDomains = [
-    'docs.google.com',
-    'forms.google.com',
-    'forms.gle',
-    'typeform.com',
-    'jotform.com',
-    'surveymonkey.com',
-    'airtable.com',
-    'notion.so',
-    'zohorecruit.com',
-    'zoho.com',
-    'freshteam.com',
-    'keka.com',
-    'darwinbox.com',
-    'greythr.com',
-    'bamboohr.com',
-    'forms.microsoft.com',
-    'office.com',
+    // Google forms
+    'docs.google.com', 'forms.google.com', 'forms.gle',
+    // Popular form builders used by Indian companies for job applications
+    'typeform.com', 'jotform.com', 'surveymonkey.com',
+    'airtable.com', 'notion.so', 'tally.so',
+    'binary.so',        // Rapido, many Indian startups use this
+    'unstop.com',       // Already has dedicated script but just in case
+    'forms.app',
+    'cognitoforms.com',
+    'paperform.co',
+    'fillout.com',
+    'formstack.com',
+    'wufoo.com',
+    // Indian HRMS/ATS that host forms
+    'zohorecruit.com', 'zoho.com',
+    'freshteam.com', 'freshworks.com',
+    'keka.com', 'darwinbox.com',
+    'greythr.com', 'bamboohr.com',
+    'recruitcrm.io', 'hirecraft.in',
+    'springrecruit.com', 'razorpayX.com',
+    // Microsoft forms
+    'forms.microsoft.com', 'office.com',
   ];
 
   function isAmbiguousDomain() {
@@ -247,35 +291,96 @@ function injectUniversalTracker(platformName) {
     return ambiguousDomains.some(d => hostname.includes(d));
   }
 
+  // Words that appear in success/confirmation messages — NOT job role names.
+  // If h1/h2 contains any of these, it's a success message, not a role title.
+  const NOISE_PHRASES = [
+    'thank you', 'thanks for', 'successfully applied', 'you have applied',
+    "you've applied", 'application submitted', 'application received',
+    'we have received', 'your application', 'congratulations',
+    'we will be in touch', 'we will get back', 'our team will',
+    'your submission', 'response recorded', 'form submitted',
+    'you have successfully', 'successfully submitted',
+    'mohith', // personalised greetings — never a job role
+    'dear ', 'hello ', 'hi ',
+  ];
+
+  function looksLikeNoise(text) {
+    if (!text) return true;
+    const lower = text.toLowerCase();
+    // Too long to be a job title (>80 chars is almost certainly a sentence)
+    if (lower.length > 80) return true;
+    // Contains noise phrases
+    if (NOISE_PHRASES.some(p => lower.includes(p))) return true;
+    // Ends with punctuation typical of sentences
+    if (/[.!?]$/.test(text.trim())) return true;
+    return false;
+  }
+
+  function getCleanTitle() {
+    // Try headings in order — skip any that look like success messages
+    const candidates = [
+      ...Array.from(document.querySelectorAll('h1')),
+      ...Array.from(document.querySelectorAll('h2')),
+      ...Array.from(document.querySelectorAll('[class*="job-title"]')),
+      ...Array.from(document.querySelectorAll('[class*="position"]')),
+      ...Array.from(document.querySelectorAll('[class*="role"]')),
+    ];
+
+    for (const el of candidates) {
+      const text = el.innerText?.trim();
+      if (text && !looksLikeNoise(text)) return text;
+    }
+
+    // Try page title — strip common suffixes
+    const pageTitle = document.title
+      ?.replace(/[-|–—].*$/, '')   // "Software Engineer | Cisco Careers" → "Software Engineer"
+      ?.replace(/\s*(careers|jobs|career|apply|job)\s*/gi, '')
+      ?.trim();
+
+    if (pageTitle && !looksLikeNoise(pageTitle)) return pageTitle;
+
+    return null; // couldn't find a clean title
+  }
+
+  function getCleanCompany() {
+    // Try structured meta tags first — most reliable
+    const metaCompany =
+      document.querySelector('meta[property="og:site_name"]')?.content?.trim() ||
+      document.querySelector('meta[name="author"]')?.content?.trim() ||
+      document.querySelector('[class*="company-name"]')?.innerText?.trim() ||
+      document.querySelector('[class*="employer"]')?.innerText?.trim() ||
+      document.querySelector('[class*="org-name"]')?.innerText?.trim() ||
+      '';
+
+    if (metaCompany && !looksLikeNoise(metaCompany) && metaCompany.length < 60) {
+      return metaCompany;
+    }
+
+    // Fall back to hostname — strip known subdomains
+    const hostname = new URL(window.location.href).hostname
+      .replace(/^(www|careers|jobs|apply|work|talent)\./i, '')
+      .split('.')[0];
+
+    if (hostname && hostname.length > 1) {
+      return hostname.charAt(0).toUpperCase() + hostname.slice(1);
+    }
+
+    return null;
+  }
+
   function getPageDetails() {
     try {
-      const title =
-        document.querySelector('h1')?.innerText?.trim() ||
-        document.querySelector('h2')?.innerText?.trim() ||
-        document.title?.trim() ||
-        'Unknown Role';
-
-      const companyMeta =
-        document.querySelector('meta[property="og:site_name"]')?.content ||
-        document.querySelector('meta[name="author"]')?.content ||
-        '';
-
-      const company = companyMeta ||
-        new URL(window.location.href).hostname
-          .replace('www.', '')
-          .replace('careers.', '')
-          .replace('jobs.', '')
-          .split('.')[0] ||
-        'Unknown Company';
+      const role    = getCleanTitle();
+      const company = getCleanCompany();
 
       return {
-        company: company.charAt(0).toUpperCase() + company.slice(1),
-        role: title.substring(0, 100),
+        company:  company || null,   // null = couldn't detect
+        role:     role    || null,   // null = couldn't detect
         location: 'Unknown Location',
         platform: platformName,
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
+        url:      window.location.href,
+        date:     new Date().toISOString(),
+        status:   'Applied'
       };
     } catch (e) {
       return null;

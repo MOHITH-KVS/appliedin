@@ -1,11 +1,32 @@
 // AppliedIn - Foundit (formerly Monster India) Content Script
 
 (function () {
+  // PATH GUARD: don't track on non-apply pages of this portal
+  const _blockedPaths = ['/profile', '/dashboard', '/messages'];
+  const _currentPath = window.location.pathname.toLowerCase();
+  if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
+
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
   const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
+
+  // Validate that extracted text is actually a job role/company name
+  // and not a success message or page noise
+  const NOISE_WORDS = [
+    'thank you', 'thanks for', 'successfully applied', 'application submitted',
+    'you have applied', 'we have received', 'your application',
+    'congratulations', 'we will be in touch', 'your submission',
+  ];
+
+  function isCleanText(text) {
+    if (!text || text.length > 80) return false;
+    const lower = text.toLowerCase();
+    if (NOISE_WORDS.some(w => lower.includes(w))) return false;
+    if (/[.!?]$/.test(text.trim())) return false;
+    return true;
+  }
   function extractSalary() {
     const el = document.querySelector('[class*="salary"]') ||
                document.querySelector('[data-testid*="salary"]');
@@ -92,11 +113,11 @@
     lastHandledUrl = window.location.href;
     getPending(function (pending) {
       const data = pending || getJobDetails();
-      if (data && data.company !== 'Unknown Company') {
-        window.__appliedinCommon.saveApplication(data, null, () => chrome.storage.local.remove(PENDING_KEY));
+      if (data && isCleanText(data.company) && isCleanText(data.role)) {
+        window.__appliedinCommon.saveApplication(data, null, function() { chrome.storage.local.remove(PENDING_KEY); observerActive = true; });
       } else if (data) {
         window.__appliedinCommon.showConfirmPopup(data, 'Foundit', null,
-          function () { observerActive = false; } // lock popup open
+          function () { observerActive = false; } // lock popup open (reset on close)
         );
       }
     });
@@ -120,4 +141,15 @@
     if (bodyLooksLikeSuccess()) setTimeout(handleSuccess, 1000);
   });
   observer.observe(document.body, { childList: true, subtree: true });
+
+  // Check immediately on script load — handles redirect-based success pages
+  // where the success message is already in DOM when our script injects
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(function() {
+      if (typeof bodyLooksLikeSuccess === 'function' && bodyLooksLikeSuccess()) {
+        if (typeof handleSuccess === 'function') handleSuccess();
+      }
+    }, 500);
+  }
+
 })();

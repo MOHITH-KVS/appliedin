@@ -6,8 +6,29 @@
 // that cached data at submission time instead of re-scraping the modal.
 
 (function () {
+  // PATH GUARD: don't track on non-apply pages of this portal
+  const _blockedPaths = ['/messaging', '/notifications', '/feed', '/mynetwork', '/learning', '/in/', '/company/', '/school/', '/groups/'];
+  const _currentPath = window.location.pathname.toLowerCase();
+  if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
+
   console.log('[AppliedIn] linkedin.js loaded on', window.location.href);
 
+
+  // Validate that extracted text is actually a job role/company name
+  // and not a success message or page noise
+  const NOISE_WORDS = [
+    'thank you', 'thanks for', 'successfully applied', 'application submitted',
+    'you have applied', 'we have received', 'your application',
+    'congratulations', 'we will be in touch', 'your submission',
+  ];
+
+  function isCleanText(text) {
+    if (!text || text.length > 80) return false;
+    const lower = text.toLowerCase();
+    if (NOISE_WORDS.some(w => lower.includes(w))) return false;
+    if (/[.!?]$/.test(text.trim())) return false;
+    return true;
+  }
   function extractSalary() {
     const selectors = [
       '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
@@ -180,7 +201,7 @@
         window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
           // user answered — this URL stays marked as handled
         },
-          function () { observerActive = false; } // lock popup open
+          function () { observerActive = false; } // lock popup open (reset on close)
         );
       } else {
         lastHandledUrl = null;
@@ -232,5 +253,16 @@
     childList: true,
     subtree: true
   });
+
+
+  // Check immediately on script load — handles redirect-based success pages
+  // where the success message is already in DOM when our script injects
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(function() {
+      if (typeof bodyLooksLikeSuccess === 'function' && bodyLooksLikeSuccess()) {
+        if (typeof handleSuccess === 'function') handleSuccess();
+      }
+    }, 500);
+  }
 
 })();

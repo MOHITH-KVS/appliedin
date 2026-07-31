@@ -8,6 +8,11 @@
 // can close the popup except the user clicking Yes or No.
 
 (function () {
+  // PATH GUARD: don't track on non-apply pages of this portal
+  const _blockedPaths = ['/member/', '/community/', '/profile/', '/salary/', '/reviews/'];
+  const _currentPath = window.location.pathname.toLowerCase();
+  if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
+
   if (window.__appliedinGlassdoorInjected) return;
   window.__appliedinGlassdoorInjected = true;
 
@@ -17,6 +22,22 @@
   let observerActive = true; // we flip this to false once popup opens
 
   // ── Salary / JobType / WorkMode helpers ──
+
+  // Validate that extracted text is actually a job role/company name
+  // and not a success message or page noise
+  const NOISE_WORDS = [
+    'thank you', 'thanks for', 'successfully applied', 'application submitted',
+    'you have applied', 'we have received', 'your application',
+    'congratulations', 'we will be in touch', 'your submission',
+  ];
+
+  function isCleanText(text) {
+    if (!text || text.length > 80) return false;
+    const lower = text.toLowerCase();
+    if (NOISE_WORDS.some(w => lower.includes(w))) return false;
+    if (/[.!?]$/.test(text.trim())) return false;
+    return true;
+  }
   function extractSalary() {
     const selectors = ['[class*="salary"]','[class*="payRange"]','[class*="compensation"]'];
     for (const sel of selectors) {
@@ -150,7 +171,7 @@
             status: 'Applied'
           },
           'Glassdoor',
-          function () { chrome.storage.local.remove(PENDING_KEY); }, // onDone
+          function () { chrome.storage.local.remove(PENDING_KEY); observerActive = true; }, // onDone — reset so next app works
           function () { observerActive = false; }                    // onOpen — disconnect observer
         );
       }
