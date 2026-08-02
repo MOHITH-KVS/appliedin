@@ -125,8 +125,8 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     // Dev / Learning (not job apply)
     'github.com', 'stackoverflow.com', 'leetcode.com', 'hackerrank.com',
     'geeksforgeeks.org', 'udemy.com', 'coursera.org',
-    // Docs / Productivity
-    'docs.google.com', 'drive.google.com', 'sheets.google.com',
+    // Docs / Productivity (docs.google.com excluded — used for job application forms)
+    'drive.google.com', 'sheets.google.com', 'slides.google.com',
     'notion.so', 'trello.com', 'slack.com', 'teams.microsoft.com',
     // Search
     'google.com', 'bing.com', 'duckduckgo.com',
@@ -140,6 +140,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   // Only list domains that have NO dedicated script and need universal tracker.
   const JOB_DOMAINS = [
     // Form tools used by Indian companies for job applications
+    'docs.google.com', 'forms.gle',  // Google Forms — huge for Indian job applications
     'binary.so', 'typeform.com', 'jotform.com', 'tally.so',
     'forms.app', 'fillout.com', 'paperform.co', 'cognitoforms.com',
     'formstack.com', 'wufoo.com',
@@ -743,7 +744,9 @@ const HARD_BLOCKED = [
   'amazon.in', 'amazon.com', 'flipkart.com', 'swiggy.com', 'zomato.com',
   'sbi.co.in', 'hdfcbank.com', 'icicibank.com', 'paytm.com', 'phonepe.com',
   'github.com', 'stackoverflow.com', 'leetcode.com', 'geeksforgeeks.org',
-  'udemy.com', 'coursera.org', 'docs.google.com', 'drive.google.com',
+  'udemy.com', 'coursera.org',
+  // NOTE: docs.google.com is NOT blocked — Google Forms is used for job applications
+  'drive.google.com', 'sheets.google.com', 'slides.google.com',
   'google.com', 'bing.com', 'duckduckgo.com', 'maps.google.com',
   'translate.google.com', 'play.google.com', 'accounts.google.com',
   'chrome.google.com', 'web.whatsapp.com', 'web.telegram.org',
@@ -780,8 +783,12 @@ function guaranteeScanner() {
     '/dashboard', '/profile', '/account', '/settings', '/feed',
     '/mynetwork', '/learning', '/salary', '/reviews', '/community',
     '/my-applications', '/saved', '/wishlist', '/cart',
-    '/', // home pages
   ];
+  // Special case: on docs.google.com, ONLY process /forms/ paths
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname.includes('docs.google.com') && !path.includes('/forms/')) return;
+  // Skip exact home page only
+  if (path === '/') return;
   if (skipPaths.some(p => path === p || path.startsWith(p + '/'))) return;
 
   const SUCCESS_PHRASES = [
@@ -812,14 +819,47 @@ function guaranteeScanner() {
 
   // Extract company from page
   function getCompany() {
+    const hostname = window.location.hostname.toLowerCase();
+
+    // Google Forms — extract company from form title
+    // e.g. "Freshers hiring - v4c.ai (Bangalore)" → "v4c.ai"
+    if (hostname.includes('docs.google.com') || hostname.includes('forms.gle')) {
+      const formTitle = document.querySelector('title')?.innerText ||
+                        document.querySelector('h1')?.innerText || '';
+      // Try to extract company name patterns: "- CompanyName" or "(CompanyName)"
+      const dashMatch = formTitle.match(/[-–|]\s*([^(\n]{2,40}?)\s*(\(|$)/);
+      const parenMatch = formTitle.match(/\(([^)]{2,40})\)/);
+      if (parenMatch) return parenMatch[1].trim();
+      if (dashMatch) return dashMatch[1].trim();
+      // Fall back to full title if short enough
+      if (formTitle.length < 60) return formTitle.replace('Your response has been recorded.','').trim();
+    }
+
     const meta = document.querySelector('meta[property="og:site_name"]')?.content?.trim();
     if (meta && meta.length < 60) return meta;
-    const host = window.location.hostname.replace(/^(www|careers|jobs|apply|talent)\./i,'').split('.')[0];
+    const host = window.location.hostname.replace(/^(www|careers|jobs|apply|talent)./i,'').split('.')[0];
     return host ? host.charAt(0).toUpperCase() + host.slice(1) : '';
   }
 
   function getRole() {
-    const noiseWords = ['thank','applied','application','received','submitted','congratulations','welcome','success'];
+    const noiseWords = ['thank','applied','application','received','submitted','congratulations','welcome','success','recorded','response'];
+    const hostname = window.location.hostname.toLowerCase();
+
+    // Google Forms — role is often in the form title before the dash
+    if (hostname.includes('docs.google.com') || hostname.includes('forms.gle')) {
+      const formTitle = document.querySelector('title')?.innerText ||
+                        document.querySelector('h1')?.innerText || '';
+      // "Freshers hiring - v4c.ai" → role = "Freshers hiring"
+      const dashIdx = formTitle.search(/[-–|]/);
+      if (dashIdx > 0) {
+        const beforeDash = formTitle.substring(0, dashIdx).trim();
+        if (beforeDash.length > 2 && beforeDash.length < 80) return beforeDash;
+      }
+      if (formTitle.length < 80 && !noiseWords.some(w => formTitle.toLowerCase().includes(w))) {
+        return formTitle.trim();
+      }
+    }
+
     const candidates = [...document.querySelectorAll('h1,h2,[class*="job-title"],[class*="position"]')];
     for (const el of candidates) {
       const t = el.innerText?.trim() || '';
