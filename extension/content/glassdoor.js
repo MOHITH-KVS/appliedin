@@ -1,34 +1,27 @@
-// AppliedIn - Glassdoor Content Script v2
-// Complete rewrite with bulletproof popup locking.
-//
-// FLOW:
-// 1. User clicks Apply/Easy Apply → cache job data silently
-// 2. User clicks Submit → show popup IMMEDIATELY (don't wait for success)
-// 3. Popup is LOCKED — MutationObserver disconnected, overlay blocks all clicks
-// 4. Success message arrives → IGNORED (popup already handling it)
-// 5. User fills details → clicks Save → application saved
+// AppliedIn - Glassdoor Content Script v3
+// Architecture: Show popup ONLY after success confirmed.
+// Popup uses setInterval heartbeat to survive React re-renders.
 
 (function () {
-  const _blockedPaths = ['/member/', '/community/', '/profile/', '/salary/', '/reviews/'];
+  const _blockedPaths = ['/member/','/community/','/profile/','/salary/','/reviews/'];
   if (_blockedPaths.some(p => window.location.pathname.toLowerCase().startsWith(p))) return;
   if (window.__appliedinGlassdoorInjected) return;
   window.__appliedinGlassdoorInjected = true;
-  window.__appliedinHandled = true; // tell guarantee layer to stay away
+  window.__appliedinHandled = true; // keep guarantee layer away
 
   const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
-  const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
-  let popupOpen = false;
-  let alreadySaved = false;
+  const MAX_AGE = 30 * 60 * 1000;
+  let alreadyHandled = false;
+  let heartbeat = null;
 
   // ── Helpers ──
   function extractSalary() {
-    for (const sel of ['[class*="salary"]','[class*="payRange"]','[class*="compensation"]']) {
-      const el = document.querySelector(sel);
+    for (const s of ['[class*="salary"]','[class*="payRange"]','[class*="compensation"]']) {
+      const el = document.querySelector(s);
       if (el?.innerText?.trim()) return el.innerText.trim();
     }
     return '';
   }
-
   function extractJobType() {
     const t = (document.body.innerText||'').toLowerCase();
     if (t.includes('internship')) return 'Internship';
@@ -37,273 +30,256 @@
     if (t.includes('contract')) return 'Contract';
     return '';
   }
-
   function extractWorkMode() {
     const t = (document.body.innerText||'').toLowerCase();
     if (t.includes('remote')) return 'Remote';
     if (t.includes('hybrid')) return 'Hybrid';
     return 'On-site';
   }
-
+  function isNoise(text) {
+    if (!text || text.length > 80) return true;
+    const bad = ['thank','applied','application','received','submitted',
+                 'congratulations','we\'re thrilled','we will','our team'];
+    return bad.some(w => text.toLowerCase().includes(w)) || /[.!?]$/.test(text.trim());
+  }
   function getJobDetails() {
     try {
-      const noiseWords = ['thank','applied','application','received','submitted','congratulations'];
-      function clean(text) {
-        if (!text||text.length>80) return null;
-        if (noiseWords.some(w=>text.toLowerCase().includes(w))) return null;
-        if (/[.!?]$/.test(text.trim())) return null;
-        return text.trim();
-      }
-
-      const title = clean(document.querySelector('[data-test="job-title"]')?.innerText) ||
-                    clean(document.querySelector('.jobTitle')?.innerText) ||
-                    clean(document.querySelector('h1')?.innerText) || '';
-
-      const company = clean(document.querySelector('[data-test="employer-name"]')?.innerText) ||
-                      clean(document.querySelector('.employerName')?.innerText) ||
-                      clean(document.querySelector('[class*="employerName"]')?.innerText) || '';
-
-      const location = document.querySelector('[data-test="location"]')?.innerText?.trim() ||
-                       document.querySelector('.location')?.innerText?.trim() || 'Unknown Location';
-
+      const title =
+        [document.querySelector('[data-test="job-title"]'),
+         document.querySelector('.jobTitle'),
+         document.querySelector('h1')]
+        .map(el => el?.innerText?.trim())
+        .find(t => t && !isNoise(t)) || '';
+      const company =
+        [document.querySelector('[data-test="employer-name"]'),
+         document.querySelector('.employerName'),
+         document.querySelector('[class*="employerName"]')]
+        .map(el => el?.innerText?.trim())
+        .find(t => t && !isNoise(t)) || '';
+      const location =
+        document.querySelector('[data-test="location"]')?.innerText?.trim() ||
+        document.querySelector('.location')?.innerText?.trim() || '';
       return {
         company, role: title, location,
-        salary: extractSalary(),
-        jobType: extractJobType(),
-        workMode: extractWorkMode(),
-        platform: 'Glassdoor',
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
+        salary: extractSalary(), jobType: extractJobType(), workMode: extractWorkMode(),
+        platform: 'Glassdoor', url: window.location.href,
+        date: new Date().toISOString(), status: 'Applied'
       };
     } catch(e) { return null; }
   }
-
   function cachePending(data) {
-    if (data && data.company) {
-      chrome.storage.local.set({ [PENDING_KEY]: { jobData: data, timestamp: Date.now() } });
-    }
+    if (data?.company) chrome.storage.local.set({[PENDING_KEY]:{jobData:data,ts:Date.now()}});
   }
-
   function getPending(cb) {
-    chrome.storage.local.get([PENDING_KEY], function(r) {
+    chrome.storage.local.get([PENDING_KEY], r => {
       const e = r[PENDING_KEY];
-      cb(e && (Date.now()-e.timestamp) < PENDING_MAX_AGE_MS ? e.jobData : null);
+      cb(e && (Date.now()-e.ts) < MAX_AGE ? e.jobData : null);
     });
   }
-
   function showToast(msg, color) {
     const t = document.createElement('div');
-    t.style.cssText = `position:fixed;bottom:24px;right:24px;padding:12px 20px;
-      border-radius:8px;font-size:14px;font-weight:500;z-index:2147483647;
-      box-shadow:0 4px 12px rgba(0,0,0,0.2);background:${color};color:white;
-      font-family:-apple-system,sans-serif;`;
+    t.style.cssText = `position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;
+      font-size:14px;font-weight:500;z-index:2147483647;color:white;background:${color};
+      box-shadow:0 4px 12px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif;`;
     t.innerText = msg;
     document.body.appendChild(t);
-    setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3000);
+    setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3500);
   }
-
-  function saveApplication(data) {
-    if (alreadySaved) return;
-    alreadySaved = true;
-    chrome.runtime.sendMessage({ type: 'SAVE_APPLICATION', data }, function(res) {
+  function doSave(data) {
+    chrome.runtime.sendMessage({type:'SAVE_APPLICATION',data}, res => {
       chrome.storage.local.remove(PENDING_KEY);
-      if (res && res.duplicate) {
-        showToast('⚠️ Already applied here recently!', '#f59e0b');
-      } else {
-        showToast('✅ Saved — ' + data.company, '#22c55e');
-      }
+      showToast(res?.duplicate ? '⚠️ Already applied here recently!' : '✅ Saved — '+data.company,
+                res?.duplicate ? '#f59e0b' : '#22c55e');
     });
   }
 
-  // ── THE LOCKED POPUP ──
-  // Once this opens, NOTHING can close it except the user clicking Save or Skip.
-  // - MutationObserver is disconnected on open
-  // - Overlay intercepts all clicks (pointer-events: all)
-  // - No external code can remove it (we use a MutationObserver to RE-ADD it if removed)
-  function showLockedPopup(jobData) {
-    if (popupOpen) return;
-    popupOpen = true;
-
-    // Disconnect our own observer so success message doesn't re-trigger
-    observer.disconnect();
-
-    // Remove any existing popup fragments
-    document.getElementById('appliedin-overlay')?.remove();
-    document.getElementById('appliedin-confirm')?.remove();
+  // ── Heartbeat popup — survives React re-renders ──
+  // Instead of fighting React, we use setInterval to re-add the popup
+  // every 100ms if it gets removed. The popup IS the source of truth.
+  // heartbeat stops only when user clicks Save or Skip.
+  function showHeartbeatPopup(jobData) {
+    if (alreadyHandled) return;
+    alreadyHandled = true;
+    observer.disconnect(); // stop watching for success — popup handles it now
 
     const company = jobData?.company || '';
-    const role    = jobData?.role || '';
+    const role    = jobData?.role    || '';
 
-    const overlay = document.createElement('div');
-    overlay.id = 'appliedin-overlay';
-    overlay.style.cssText = `
-      position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2147483646;
-      font-family:-apple-system,BlinkMacSystemFont,sans-serif;`;
-
-    const popup = document.createElement('div');
-    popup.id = 'appliedin-confirm';
-    popup.style.cssText = `
-      position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-      width:420px;max-width:90vw;background:white;border-radius:16px;
-      padding:28px;box-shadow:0 24px 64px rgba(0,0,0,0.35);
-      z-index:2147483647;border:1px solid #e5e7eb;`;
-
-    popup.innerHTML = `
-      <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">📋 AppliedIn</div>
-      <div style="font-size:13px;color:#6b7280;margin-bottom:18px;">
-        Confirm your application details to save.
-      </div>
-      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:18px;">
-        <div>
-          <label style="font-size:11px;font-weight:700;color:#6b7280;
-            text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">
-            Company
-          </label>
-          <input id="ai-gd-company" value="${company.replace(/"/g,'')}"
-            placeholder="Type company name..."
-            style="width:100%;box-sizing:border-box;padding:10px 12px;
-            border:2px solid ${company?'#e5e7eb':'#ef4444'};border-radius:8px;
-            font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
-          ${!company?'<div style="font-size:11px;color:#ef4444;margin-top:3px;">⚠️ Could not detect — please type it</div>':''}
+    function buildPopupHTML() {
+      return `
+        <div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:4px;">📋 AppliedIn</div>
+        <div style="font-size:13px;color:#22c55e;font-weight:600;margin-bottom:14px;">
+          ✅ Application submitted — save the details
         </div>
-        <div>
-          <label style="font-size:11px;font-weight:700;color:#6b7280;
-            text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">
-            Job Role
-          </label>
-          <input id="ai-gd-role" value="${role.replace(/"/g,'').substring(0,80)}"
-            placeholder="Type job role..."
-            style="width:100%;box-sizing:border-box;padding:10px 12px;
-            border:2px solid ${role?'#e5e7eb':'#ef4444'};border-radius:8px;
-            font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
-          ${!role?'<div style="font-size:11px;color:#ef4444;margin-top:3px;">⚠️ Could not detect — please type it</div>':''}
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;
+              letter-spacing:.05em;display:block;margin-bottom:3px;">Company *</label>
+            <input id="ai-gd-company" value="${company.replace(/"/g,'&quot;')}"
+              placeholder="Type company name..."
+              style="width:100%;box-sizing:border-box;padding:10px 12px;
+              border:2px solid ${company?'#d1d5db':'#ef4444'};border-radius:8px;
+              font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
+            ${!company?'<div style="font-size:11px;color:#ef4444;margin-top:2px;">⚠️ Not detected — please type it</div>':''}
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;
+              letter-spacing:.05em;display:block;margin-bottom:3px;">Job Role *</label>
+            <input id="ai-gd-role" value="${role.replace(/"/g,'&quot;').substring(0,80)}"
+              placeholder="Type job role..."
+              style="width:100%;box-sizing:border-box;padding:10px 12px;
+              border:2px solid ${role?'#d1d5db':'#ef4444'};border-radius:8px;
+              font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
+            ${!role?'<div style="font-size:11px;color:#ef4444;margin-top:2px;">⚠️ Not detected — please type it</div>':''}
+          </div>
         </div>
-      </div>
-      <div style="display:flex;gap:10px;">
-        <button id="ai-gd-save"
-          style="flex:1;padding:12px;background:#22c55e;color:white;border:none;
-          border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
-          ✅ Save Application
-        </button>
-        <button id="ai-gd-skip"
-          style="flex:1;padding:12px;background:#f3f4f6;color:#374151;border:none;
-          border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
-          Skip
-        </button>
-      </div>
-    `;
+        <div style="display:flex;gap:8px;">
+          <button id="ai-gd-save"
+            style="flex:1;padding:11px;background:#22c55e;color:white;border:none;
+            border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
+            ✅ Save Application
+          </button>
+          <button id="ai-gd-skip"
+            style="padding:11px 18px;background:#f3f4f6;color:#374151;border:none;
+            border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
+            Skip
+          </button>
+        </div>`;
+    }
 
-    document.body.appendChild(overlay);
-    document.body.appendChild(popup);
+    function ensurePopupExists() {
+      // If popup already exists and is in DOM — attach listeners and return
+      if (document.getElementById('ai-gd-popup')) return;
 
-    // Guard: if Glassdoor's own JS tries to remove our popup elements,
-    // put them back immediately using a dedicated watcher
-    const guardObserver = new MutationObserver(function() {
-      if (!document.getElementById('appliedin-confirm') && popupOpen) {
-        document.body.appendChild(overlay);
-        document.body.appendChild(popup);
-      }
-    });
-    guardObserver.observe(document.body, { childList: true });
+      // Popup was removed (React re-render) — rebuild it
+      const existing_overlay = document.getElementById('ai-gd-overlay');
+      if (existing_overlay) existing_overlay.remove();
 
-    // Focus first empty field
-    setTimeout(()=>{
+      const overlay = document.createElement('div');
+      overlay.id = 'ai-gd-overlay';
+      overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.6);
+        z-index:2147483645;`;
+
+      const popup = document.createElement('div');
+      popup.id = 'ai-gd-popup';
+      popup.style.cssText = `position:fixed;top:50%;left:50%;
+        transform:translate(-50%,-50%);width:400px;max-width:92vw;
+        background:white;border-radius:16px;padding:24px;
+        box-shadow:0 24px 80px rgba(0,0,0,0.4);z-index:2147483647;
+        border:1px solid #e5e7eb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;`;
+      popup.innerHTML = buildPopupHTML();
+
+      document.body.appendChild(overlay);
+      document.body.appendChild(popup);
+
+      // Restore typed values if user had already typed something
+      const savedCompany = window.__ai_gd_company || company;
+      const savedRole    = window.__ai_gd_role    || role;
+      const ci = document.getElementById('ai-gd-company');
+      const ri = document.getElementById('ai-gd-role');
+      if (ci) { ci.value = savedCompany; ci.style.border = `2px solid ${savedCompany?'#d1d5db':'#ef4444'}`; }
+      if (ri) { ri.value = savedRole;    ri.style.border = `2px solid ${savedRole?'#d1d5db':'#ef4444'}`; }
+
+      // Save typed values so we can restore after re-render
+      if (ci) ci.addEventListener('input', () => { window.__ai_gd_company = ci.value; });
+      if (ri) ri.addEventListener('input', () => { window.__ai_gd_role = ri.value; });
+
+      document.getElementById('ai-gd-save').addEventListener('click', function() {
+        const finalCompany = document.getElementById('ai-gd-company')?.value.trim() || '';
+        const finalRole    = document.getElementById('ai-gd-role')?.value.trim() || '';
+
+        // Block save if either field is empty
+        if (!finalCompany) {
+          const el = document.getElementById('ai-gd-company');
+          if (el) { el.style.border='2px solid #ef4444'; el.focus(); }
+          showToast('⚠️ Please enter the company name', '#ef4444');
+          return;
+        }
+        if (!finalRole) {
+          const el = document.getElementById('ai-gd-role');
+          if (el) { el.style.border='2px solid #ef4444'; el.focus(); }
+          showToast('⚠️ Please enter the job role', '#ef4444');
+          return;
+        }
+
+        // Stop heartbeat FIRST so popup isn't re-added after removal
+        clearInterval(heartbeat);
+        overlay.remove();
+        popup.remove();
+
+        doSave({
+          ...(jobData||{}),
+          company: finalCompany, role: finalRole,
+          platform: 'Glassdoor', url: window.location.href,
+          date: new Date().toISOString(), status: 'Applied'
+        });
+      });
+
+      document.getElementById('ai-gd-skip').addEventListener('click', function() {
+        clearInterval(heartbeat);
+        overlay.remove();
+        popup.remove();
+        chrome.storage.local.remove(PENDING_KEY);
+      });
+    }
+
+    // Focus first empty field on first render
+    setTimeout(() => {
       const c = document.getElementById('ai-gd-company');
       const r = document.getElementById('ai-gd-role');
-      ((c && !c.value.trim()) ? c : (r && !r.value.trim()) ? r : c)?.focus();
-    }, 100);
+      if (c && !c.value.trim()) c.focus();
+      else if (r && !r.value.trim()) r.focus();
+    }, 150);
 
-    function closePopup() {
-      popupOpen = false;
-      guardObserver.disconnect();
-      overlay.remove();
-      popup.remove();
-    }
+    // Heartbeat: check every 120ms — re-add popup if React removed it
+    ensurePopupExists();
+    heartbeat = setInterval(ensurePopupExists, 120);
 
-    document.getElementById('ai-gd-save').addEventListener('click', function() {
-      const finalCompany = document.getElementById('ai-gd-company').value.trim();
-      const finalRole    = document.getElementById('ai-gd-role').value.trim();
+    // Safety: stop after 5 minutes (user clearly abandoned)
+    setTimeout(() => clearInterval(heartbeat), 5 * 60 * 1000);
+  }
 
-      if (!finalCompany) {
-        document.getElementById('ai-gd-company').style.border = '2px solid #ef4444';
-        document.getElementById('ai-gd-company').focus();
-        return;
-      }
-      if (!finalRole) {
-        document.getElementById('ai-gd-role').style.border = '2px solid #ef4444';
-        document.getElementById('ai-gd-role').focus();
-        return;
-      }
+  // ── Success detection ──
+  const successPhrases = [
+    'application submitted','your application has been submitted',
+    'successfully applied','you have applied',"you've applied",
+    'thank you for applying','we have received your application',
+    'application sent','your application has been sent',
+  ];
+  function isSuccess() {
+    return successPhrases.some(p => (document.body.innerText||'').toLowerCase().includes(p));
+  }
 
-      closePopup();
-      saveApplication({
-        ...(jobData||{}),
-        company: finalCompany,
-        role: finalRole,
-        platform: 'Glassdoor',
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
-      });
-    });
-
-    document.getElementById('ai-gd-skip').addEventListener('click', closePopup);
-    // Overlay click does NOT close — user must explicitly click Skip
-    // This prevents accidental dismissal when Glassdoor redraws the page
-  };
-
-  // ── MutationObserver — watches for success BEFORE submit click ──
-  // Only used as a backup if user submits without clicking a detected button
-  const observer = new MutationObserver(function() {
-    if (popupOpen || alreadySaved) return;
-    const bodyText = (document.body.innerText||'').toLowerCase();
-    const successPhrases = [
-      'application submitted','your application has been submitted',
-      'successfully applied','you have applied',"you've applied",
-      'thank you for applying','we have received your application'
-    ];
-    if (successPhrases.some(p=>bodyText.includes(p))) {
-      setTimeout(()=>{
-        if (popupOpen||alreadySaved) return;
-        getPending(function(pending){
-          const data = pending || getJobDetails();
-          if (data && data.company) {
-            saveApplication(data);
-          } else {
-            showLockedPopup(data || {});
-          }
-        });
-      }, 800);
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  // ── Click handler — PRIMARY trigger for popup ──
+  // ── Cache job data on any apply click ──
   document.addEventListener('click', function(e) {
     const btn = e.target.closest('button,[role="button"]');
     if (!btn) return;
     const text = (btn.innerText||btn.getAttribute('aria-label')||'').toLowerCase().trim();
-
-    // Cache job details on ANY apply click
-    if (text.includes('apply')||text.includes('easy apply')) {
-      const data = getJobDetails();
-      cachePending(data);
+    if (text.includes('apply') || text.includes('easy apply')) {
+      cachePending(getJobDetails());
     }
+  }, true);
 
-    // On final submit — show popup IMMEDIATELY, don't wait for success message
-    const isFinalSubmit = text==='submit' ||
-      text.includes('submit application') ||
-      text.includes('send application') ||
-      text.includes('submit my application');
-
-    if (isFinalSubmit && !popupOpen && !alreadySaved) {
+  // ── MutationObserver — waits for success, THEN shows popup ──
+  const observer = new MutationObserver(function() {
+    if (alreadyHandled) return;
+    if (!isSuccess()) return;
+    // Success confirmed — show popup now
+    setTimeout(() => {
+      if (alreadyHandled) return;
       getPending(function(pending) {
-        const data = pending || getJobDetails();
-        showLockedPopup(data || {});
+        showHeartbeatPopup(pending || getJobDetails() || {});
       });
-    }
-  }, true); // useCapture=true — fires before Glassdoor's own handlers
+    }, 600);
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Fallback: check on page load (redirect-based success)
+  if (isSuccess()) {
+    setTimeout(() => {
+      getPending(p => showHeartbeatPopup(p || getJobDetails() || {}));
+    }, 800);
+  }
 
 })();

@@ -822,17 +822,40 @@ function guaranteeScanner() {
     const hostname = window.location.hostname.toLowerCase();
 
     // Google Forms — extract company from form title
-    // e.g. "Freshers hiring - v4c.ai (Bangalore)" → "v4c.ai"
+    // Pattern 1: "Freshers hiring - v4c.ai (Bangalore)" → company = "v4c.ai"
+    // Pattern 2: "Glowlogics Internship Registration Form" → company = "Glowlogics"
     if (hostname.includes('docs.google.com') || hostname.includes('forms.gle')) {
-      const formTitle = document.querySelector('title')?.innerText ||
-                        document.querySelector('h1')?.innerText || '';
-      // Try to extract company name patterns: "- CompanyName" or "(CompanyName)"
-      const dashMatch = formTitle.match(/[-–|]\s*([^(\n]{2,40}?)\s*(\(|$)/);
-      const parenMatch = formTitle.match(/\(([^)]{2,40})\)/);
-      if (parenMatch) return parenMatch[1].trim();
-      if (dashMatch) return dashMatch[1].trim();
-      // Fall back to full title if short enough
-      if (formTitle.length < 60) return formTitle.replace('Your response has been recorded.','').trim();
+      const rawTitle = document.querySelector('h1')?.innerText?.trim() ||
+                       document.querySelector('title')?.innerText?.trim() || '';
+      // Remove success message if appended
+      const formTitle = rawTitle.replace('Your response has been recorded.','').trim();
+
+      // Try parentheses first: "Hiring - CompanyName (City)" → "CompanyName"
+      const parenMatch = formTitle.match(/\(([A-Za-z][^)]{1,40})\)/);
+      if (parenMatch && !/batch|year|202\d/i.test(parenMatch[1])) {
+        return parenMatch[1].trim();
+      }
+
+      // Try first word(s) before "Internship/Job/Hiring/Registration/Form"
+      // "Glowlogics Internship Registration Form" → "Glowlogics"
+      const firstWordMatch = formTitle.match(/^([A-Za-z][A-Za-z0-9._-]{1,30})/);
+      if (firstWordMatch) {
+        const candidate = firstWordMatch[1].trim();
+        // Must look like a company name (not generic words)
+        const genericWords = ['freshers','hiring','job','internship','form','apply',
+                              'application','registration','open','vacancy','recruitment'];
+        if (!genericWords.some(w => candidate.toLowerCase() === w)) {
+          return candidate;
+        }
+      }
+
+      // Try after dash: "Role - CompanyName" → "CompanyName"
+      const dashMatch = formTitle.match(/[-–|]\s*([A-Za-z][^\n(]{2,40}?)\s*$/);
+      if (dashMatch && !/batch|year|202\d/i.test(dashMatch[1])) {
+        return dashMatch[1].trim();
+      }
+
+      return ''; // couldn't parse — popup will ask user
     }
 
     const meta = document.querySelector('meta[property="og:site_name"]')?.content?.trim();
@@ -939,18 +962,24 @@ function guaranteeScanner() {
     popup.remove();
   }
 
+  // Save typed values so re-renders don't lose them
+  const companyEl = document.getElementById('ai-company');
+  const roleEl    = document.getElementById('ai-role');
+  if (companyEl) companyEl.addEventListener('input', () => { window.__ai_saved_company = companyEl.value; });
+  if (roleEl)    roleEl.addEventListener('input',    () => { window.__ai_saved_role    = roleEl.value; });
+
   document.getElementById('ai-save').addEventListener('click', function() {
-    const finalCompany = document.getElementById('ai-company').value.trim();
-    const finalRole    = document.getElementById('ai-role').value.trim();
+    const finalCompany = (document.getElementById('ai-company')?.value || '').trim();
+    const finalRole    = (document.getElementById('ai-role')?.value    || '').trim();
 
     if (!finalCompany) {
-      document.getElementById('ai-company').style.border = '2px solid #ef4444';
-      document.getElementById('ai-company').focus();
+      const el = document.getElementById('ai-company');
+      if (el) { el.style.border='2px solid #ef4444'; el.placeholder='⚠️ Required — type company name'; el.focus(); }
       return;
     }
     if (!finalRole) {
-      document.getElementById('ai-role').style.border = '2px solid #ef4444';
-      document.getElementById('ai-role').focus();
+      const el = document.getElementById('ai-role');
+      if (el) { el.style.border='2px solid #ef4444'; el.placeholder='⚠️ Required — type job role'; el.focus(); }
       return;
     }
 

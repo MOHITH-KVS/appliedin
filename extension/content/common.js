@@ -166,12 +166,24 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       if (onDone) onDone();
     }
 
-    document.getElementById('appliedin-yes').addEventListener('click', function () {
-      const finalCompany = document.getElementById('appliedin-company').value.trim();
-      const finalRole = document.getElementById('appliedin-role').value.trim();
+    // Save typed values to survive any DOM disruptions
+    const _ci = document.getElementById('appliedin-company');
+    const _ri = document.getElementById('appliedin-role');
+    if (_ci) _ci.addEventListener('input', () => { window.__ai_company = _ci.value; });
+    if (_ri) _ri.addEventListener('input', () => { window.__ai_role    = _ri.value; });
 
-      if (!finalCompany || !finalRole) {
-        alert('Please enter company and role.');
+    document.getElementById('appliedin-yes').addEventListener('click', function () {
+      const finalCompany = (document.getElementById('appliedin-company')?.value || '').trim();
+      const finalRole    = (document.getElementById('appliedin-role')?.value    || '').trim();
+
+      if (!finalCompany) {
+        const el = document.getElementById('appliedin-company');
+        if (el) { el.style.border='2px solid #ef4444'; el.placeholder='⚠️ Required'; el.focus(); }
+        return;
+      }
+      if (!finalRole) {
+        const el = document.getElementById('appliedin-role');
+        if (el) { el.style.border='2px solid #ef4444'; el.placeholder='⚠️ Required'; el.focus(); }
         return;
       }
 
