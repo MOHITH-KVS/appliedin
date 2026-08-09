@@ -121,7 +121,8 @@
   });
 
   const observer = new MutationObserver(function () {
-    if (!observerActive) return; // popup open — locked, don't interfere
+    if (window.__appliedinPopupOpen) return; // any popup open — don't interfere
+    if (!observerActive) return;
     if (lastHandledUrl === window.location.href) return;
     if (bodyLooksLikeSuccess()) setTimeout(handleSuccess, 1000);
   });

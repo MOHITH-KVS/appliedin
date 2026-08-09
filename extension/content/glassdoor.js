@@ -241,13 +241,34 @@
 
   // ── Success detection ──
   const successPhrases = [
-    'application submitted','your application has been submitted',
-    'successfully applied','you have applied',"you've applied",
-    'thank you for applying','we have received your application',
-    'application sent','your application has been sent',
+    // Glassdoor specific — "Your application was sent!" is the actual text
+    'your application was sent',
+    'application was sent',
+    // Standard variants
+    'application submitted',
+    'your application has been submitted',
+    'your application has been sent',
+    'application sent',
+    'successfully applied',
+    'you have applied',
+    "you've applied",
+    'thank you for applying',
+    'we have received your application',
+    'you have successfully applied',
+    // Easy apply success
+    'ready for jobs to come to you',  // Glassdoor post-apply screen
   ];
   function isSuccess() {
-    return successPhrases.some(p => (document.body.innerText||'').toLowerCase().includes(p));
+    // Check body text
+    const bodyText = (document.body.innerText || '').toLowerCase();
+    if (successPhrases.some(p => bodyText.includes(p))) return true;
+    // Also check dialogs/modals — Glassdoor shows success inside a dialog
+    const dialogs = document.querySelectorAll('[role="dialog"],[class*="modal"],[class*="Modal"],[class*="dialog"]');
+    for (const d of dialogs) {
+      const t = (d.innerText || '').toLowerCase();
+      if (successPhrases.some(p => t.includes(p))) return true;
+    }
+    return false;
   }
 
   // ── Cache job data on any apply click ──
@@ -263,6 +284,7 @@
   // ── MutationObserver — waits for success, THEN shows popup ──
   const observer = new MutationObserver(function() {
     if (alreadyHandled) return;
+    if (window.__appliedinPopupOpen) return;
     if (!isSuccess()) return;
     // Success confirmed — show popup now
     setTimeout(() => {
@@ -273,7 +295,7 @@
     }, 600);
   });
 
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class','style','aria-hidden'] });
 
   // Fallback: check on page load (redirect-based success)
   if (isSuccess()) {
@@ -281,5 +303,16 @@
       getPending(p => showHeartbeatPopup(p || getJobDetails() || {}));
     }, 800);
   }
+
+  // Safety poll — checks every 500ms for 3 minutes
+  // Catches cases where MutationObserver misses the modal appearance
+  const safetyPoll = setInterval(function() {
+    if (alreadyHandled) { clearInterval(safetyPoll); return; }
+    if (isSuccess()) {
+      clearInterval(safetyPoll);
+      getPending(p => showHeartbeatPopup(p || getJobDetails() || {}));
+    }
+  }, 500);
+  setTimeout(() => clearInterval(safetyPoll), 3 * 60 * 1000);
 
 })();

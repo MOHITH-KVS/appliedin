@@ -1,6 +1,9 @@
 // AppliedIn - Shared helpers used by all per-site content scripts
 
 window.__appliedinCommon = window.__appliedinCommon || (function () {
+  // Global flag — set true when ANY AppliedIn popup is open
+  // All content scripts must check this before doing anything
+  window.__appliedinPopupOpen = false;
 
   // FIX BUG 1: save to IndexedDB via background message passing.
   // Content scripts can't access IndexedDB directly in the popup context,
@@ -154,15 +157,13 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
 
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
-    // Notify caller popup is open — caller can disconnect its observer here
+    window.__appliedinPopupOpen = true;
     if (onOpen) onOpen();
 
     function closePopup() {
+      window.__appliedinPopupOpen = false;
       overlay.remove();
       popup.remove();
-      // FIX BUG 2: always call onDone when popup is dismissed in any way
-      // The caller (linkedin.js, naukri.js etc) has already set lastHandledUrl
-      // before calling showConfirmPopup, so this won't re-trigger.
       if (onDone) onDone();
     }
 

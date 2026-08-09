@@ -499,12 +499,29 @@ function injectUniversalTracker(platformName) {
     }
   });
 
-  // BUG 5 FIX (pre-emptive): remove characterData — not needed, just costs CPU
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-    // characterData removed — we only need node additions, not text changes
-  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // GOOGLE FORMS FIX: On /formResponse pages, success text is already in DOM
+  // when script injects — observer never fires because no more mutations happen.
+  // Check immediately on script load.
+  setTimeout(function checkAlreadyLoaded() {
+    if (handledUrls.has(window.location.href)) return;
+    if (window.__appliedinPopupOpen) return;
+    const bodyText = (document.body?.innerText || '').toLowerCase();
+    const isAlreadySuccess = successPhrases.some(p => bodyText.includes(p));
+    if (!isAlreadySuccess) return;
+    handledUrls.add(window.location.href);
+    const jobData = getPageDetails();
+    const hasCleanData = jobData && jobData.company && jobData.role && !isAmbiguousDomain();
+    if (hasCleanData) {
+      saveApplication(jobData);
+    } else {
+      showConfirmPopup(jobData, true,
+        function () { handledUrls.add(window.location.href); },
+        function () { observerActive = false; }
+      );
+    }
+  }, 500);
 
   // Confirmation popup
   // FIX BUG 1: alreadyConfirmed = true means success was detected, we just
@@ -698,6 +715,20 @@ function injectUniversalTracker(platformName) {
 // popup migrates them to IndexedDB on next open. Zero data loss.
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+
+  // REDIRECT APPLY FLAG: content scripts set this when submit is clicked
+  // Guarantee layer checks on next page load for redirect-based ATS success
+  if (message.type === 'SET_APPLY_FLAG') {
+    const flag = {
+      origin: message.origin,
+      jobData: message.jobData,
+      ts: Date.now()
+    };
+    chrome.storage.local.set({ __appliedin_redirect_flag: flag });
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message.type !== 'SAVE_APPLICATION') return false;
 
   const jobData = message.data;
@@ -773,11 +804,33 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 });
 
 function guaranteeScanner() {
-  // Don't run if already handled by main tracker or dedicated script
-  if (window.__appliedinHandled || window.__appliedinInjected) return;
+  // Skip if already explicitly handled by a dedicated portal script
+  if (window.__appliedinHandled) return;
+  // For __appliedinInjected (universal tracker): still run on formResponse pages
+  // because the tracker's observer may have missed the already-loaded success text
+  const _gPath = window.location.pathname.toLowerCase();
+  const _isFormResponse = _gPath.includes('/formresponse') || _gPath.includes('formresponse');
+  if (window.__appliedinInjected && !_isFormResponse) return;
+
+  const path = window.location.pathname.toLowerCase();
+  const origin = window.location.origin;
+
+  // CHECK REDIRECT FLAG: if a submit was detected on same origin recently,
+  // show popup on this page even without a success phrase
+  chrome.storage.local.get(['__appliedin_redirect_flag'], function(r) {
+    const flag = r.__appliedin_redirect_flag;
+    if (flag && flag.origin === origin && (Date.now() - flag.ts) < 60000) {
+      // Clear the flag so it doesn't fire again
+      chrome.storage.local.remove('__appliedin_redirect_flag');
+      // Show popup with cached job data
+      if (!document.getElementById('ai-guarantee-popup')) {
+        showGuaranteePopup(flag.jobData || null);
+      }
+    }
+  });
 
   // Skip non-apply paths
-  const path = window.location.pathname.toLowerCase();
+
   const skipPaths = [
     '/chat', '/messages', '/messaging', '/inbox', '/notifications',
     '/dashboard', '/profile', '/account', '/settings', '/feed',
@@ -808,6 +861,12 @@ function guaranteeScanner() {
     'your response has been recorded',
     'application sent. thank you',
     'your application has been sent. thank you',
+    'your application was sent',
+    'application was sent',
+    'we have received your profile',
+    'application complete',
+    'your application is complete',
+    'application successfully submitted',
   ];
 
   const bodyText = (document.body?.innerText || '').toLowerCase();

@@ -251,7 +251,8 @@
 
   // METHOD 2 — Watch for success message appearing in the DOM
   const observer = new MutationObserver(function () {
-    if (!observerActive) return; // popup open — locked, don't interfere
+    if (window.__appliedinPopupOpen) return; // any popup open — don't interfere
+    if (!observerActive) return;
     if (lastHandledUrl === window.location.href) return;
     if (textLooksLikeSuccess()) {
       setTimeout(handleSuccess, 1000);

@@ -69,29 +69,62 @@
   const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
-  function getJobDetails() {
-    try {
-      const title =
-        document.querySelector('.jd-header-title')?.innerText?.trim() ||
-        document.querySelector('[class*="job-title"]')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
-        'Unknown Role';
+  // Pages where we should NEVER try to read job details —
+  // they are post-apply confirmation/redirect pages with no job data
+  const SKIP_DETAIL_PATHS = [
+    'myapply', 'saveapply', 'applyconfirm', 'applysuccess',
+    'apply-confirm', 'apply-success', 'application-submitted'
+  ];
 
-      const company =
-        document.querySelector('.jd-header-comp-name a')?.innerText?.trim() ||
-        document.querySelector('.jd-header-comp-name')?.innerText?.trim() ||
-        document.querySelector('[class*="comp-name"]')?.innerText?.trim() ||
-        'Unknown Company';
+  function isConfirmationPage() {
+    const url = window.location.href.toLowerCase();
+    return SKIP_DETAIL_PATHS.some(p => url.includes(p));
+  }
+
+  function getJobDetails() {
+    // On confirmation/redirect pages — return null immediately
+    // Caller will use pending cache instead
+    if (isConfirmationPage()) return null;
+
+    try {
+      const noiseWords = ['apply confirmation','apply confirm','successfully applied',
+        'you have applied','thank you','congratulations','naukri campus',
+        'application submitted','we have received'];
+
+      function cleanText(text) {
+        if (!text || text.length > 100) return null;
+        const l = text.toLowerCase();
+        if (noiseWords.some(w => l.includes(w))) return null;
+        if (/[.!?]$/.test(text.trim())) return null;
+        return text.trim();
+      }
+
+      // Try multiple Naukri selectors — listing page vs campus page differ
+      const title = cleanText(
+        document.querySelector('.jd-header-title')?.innerText) ||
+        cleanText(document.querySelector('[class*="job-title"]')?.innerText) ||
+        cleanText(document.querySelector('[class*="jobTitle"]')?.innerText) ||
+        cleanText(document.querySelector('h1')?.innerText) || '';
+
+      // Company — never use hostname as fallback
+      const company = cleanText(
+        document.querySelector('.jd-header-comp-name a')?.innerText) ||
+        cleanText(document.querySelector('.jd-header-comp-name')?.innerText) ||
+        cleanText(document.querySelector('[class*="comp-name"]')?.innerText) ||
+        cleanText(document.querySelector('[class*="companyName"]')?.innerText) ||
+        cleanText(document.querySelector('[class*="company-name"]')?.innerText) || '';
 
       const location =
         document.querySelector('.location')?.innerText?.trim() ||
-        document.querySelector('[class*="location"]')?.innerText?.trim() ||
-        'Unknown Location';
+        document.querySelector('[class*="location"]')?.innerText?.trim() || '';
+
+      // Return null if both are empty — caller shows popup
+      if (!company && !title) return null;
 
       return {
-        company,
-        role: title,
-        location,
+        company: company || '',
+        role: title || '',
+        location: location || 'Unknown Location',
         salary: extractSalary(),
         jobType: extractJobType(),
         workMode: extractWorkMode(),
@@ -101,17 +134,7 @@
         status: 'Applied'
       };
     } catch (e) {
-      // Even on error, return SOMETHING so a popup can still be shown —
-      // never go completely silent.
-      return {
-        company: 'Unknown Company',
-        role: 'Unknown Role',
-        location: 'Unknown Location',
-        platform: 'Naukri',
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
-      };
+      return null; // return null so popup shows — never save garbage
     }
   }
 
@@ -127,8 +150,12 @@
     'application submitted',
     'successfully applied',
     'you have applied',
+    'you have successfully applied',
     'your application has been submitted',
-    'applied successfully'
+    'applied successfully',
+    'successfully applied to',    // "You have successfully applied to 'Data Analyst'"
+    'application sent',
+    'thank you for applying',
   ];
 
   function cachePendingJob(jobData) {
@@ -219,10 +246,11 @@
 
   // METHOD 2 — Watch for success message
   const observer = new MutationObserver(function () {
-    if (!observerActive) return; // popup open — locked, don't interfere
+    if (window.__appliedinPopupOpen) return;
+    if (!observerActive) return;
     if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeSuccess()) {
-      setTimeout(handleSuccess, 1000);
+    if (bodyLooksLikeSuccess() || isConfirmationPage()) {
+      setTimeout(handleSuccess, 800);
     }
   });
 

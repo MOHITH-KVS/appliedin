@@ -173,7 +173,8 @@ document.addEventListener('DOMContentLoaded', function () {
           e.target.classList.contains('btn-delete') ||
           e.target.classList.contains('btn-edit') ||
           e.target.classList.contains('status-select') ||
-          e.target.closest('.delete-confirm-row')
+          e.target.closest('.delete-confirm-row') ||
+          e.target.closest('.edit-form-row')  // don't open URL when editing
         ) return;
         if (app.url) chrome.tabs.create({ url: app.url });
       });
@@ -242,6 +243,13 @@ document.addEventListener('DOMContentLoaded', function () {
         `;
 
         card.appendChild(editRow);
+
+        // Block ALL events inside edit form from bubbling up to card click handler
+        // Without this, clicking any input triggers card.click → opens job URL
+        editRow.addEventListener('click',     function(e) { e.stopPropagation(); });
+        editRow.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+        editRow.addEventListener('keydown',   function(e) { e.stopPropagation(); });
+
         editRow.querySelector('.edit-company').focus();
 
         editRow.querySelector('.edit-save').addEventListener('click', function(e) {

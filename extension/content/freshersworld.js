@@ -133,13 +133,16 @@
     if (text.includes('apply') || text.includes('submit')) {
       const cached = getJobDetailsForCaching();
       if (cached) cachePending(cached);
+      // Notify guarantee layer in case page redirects after submit
+      chrome.runtime.sendMessage({ type: 'SET_APPLY_FLAG', origin: window.location.origin, jobData: cached });
       if (lastHandledUrl === window.location.href) return;
       setTimeout(() => { if (bodyLooksLikeSuccess()) handleSuccess(); }, 2000);
     }
   });
 
   const observer = new MutationObserver(function () {
-    if (!observerActive) return; // popup open — locked, don't interfere
+    if (window.__appliedinPopupOpen) return; // any popup open — don't interfere
+    if (!observerActive) return;
     if (lastHandledUrl === window.location.href) return;
     if (bodyLooksLikeSuccess()) setTimeout(handleSuccess, 1000);
   });
