@@ -9,9 +9,6 @@
   const _currentPath = window.location.pathname.toLowerCase();
   if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
 
-  console.log('[AppliedIn] naukri.js loaded on', window.location.href);
-
-
   // Validate that extracted text is actually a job role/company name
   // and not a success message or page noise
   const NOISE_WORDS = [
@@ -59,7 +56,6 @@
     if (text.includes('hybrid')) return 'Hybrid';
     return 'On-site';
   }
-
 
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
@@ -184,7 +180,6 @@
     });
   }
 
-
   // Guard: if confirm popup already open (user typing), skip — don't interrupt.
   function isPopupOpen() {
     return !!document.getElementById('appliedin-confirm');
@@ -258,7 +253,6 @@
     childList: true,
     subtree: true
   });
-
 
   // Check immediately on script load — handles redirect-based success pages
   // where the success message is already in DOM when our script injects

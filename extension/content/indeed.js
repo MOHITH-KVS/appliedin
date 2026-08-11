@@ -12,11 +12,8 @@
   const _currentPath = window.location.pathname.toLowerCase();
   if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
 
-  console.log('[AppliedIn] indeed.js loaded on', window.location.href);
-
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
-
 
   // Validate that extracted text is actually a job role/company name
   // and not a success message or page noise
@@ -84,7 +81,6 @@
     const url = window.location.href.toLowerCase();
     return url.includes('post-apply') || url.includes('application-sent') || url.includes('applied=1');
   }
-
 
   function isPopupOpen() {
     return !!document.getElementById('appliedin-confirm');

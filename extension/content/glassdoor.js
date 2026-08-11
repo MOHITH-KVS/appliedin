@@ -115,7 +115,7 @@
           <div>
             <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;
               letter-spacing:.05em;display:block;margin-bottom:3px;">Company *</label>
-            <input id="ai-gd-company" value="${company.replace(/"/g,'&quot;')}"
+            <input id="ai-gd-company" maxlength="100" value="${company.replace(/"/g,'&quot;')}"
               placeholder="Type company name..."
               style="width:100%;box-sizing:border-box;padding:10px 12px;
               border:2px solid ${company?'#d1d5db':'#ef4444'};border-radius:8px;
@@ -125,7 +125,7 @@
           <div>
             <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;
               letter-spacing:.05em;display:block;margin-bottom:3px;">Job Role *</label>
-            <input id="ai-gd-role" value="${role.replace(/"/g,'&quot;').substring(0,80)}"
+            <input id="ai-gd-role" maxlength="120" value="${role.replace(/"/g,'&quot;').substring(0,80)}"
               placeholder="Type job role..."
               style="width:100%;box-sizing:border-box;padding:10px 12px;
               border:2px solid ${role?'#d1d5db':'#ef4444'};border-radius:8px;

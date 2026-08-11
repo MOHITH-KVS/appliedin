@@ -158,7 +158,7 @@
           <div>
             <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;
               letter-spacing:.05em;display:block;margin-bottom:3px;">Company *</label>
-            <input id="ai-is-company" value="${savedC.replace(/"/g,'&quot;')}"
+            <input id="ai-is-company" maxlength="100" value="${savedC.replace(/"/g,'&quot;')}"
               placeholder="${savedC?'':'⚠️ Type company name'}"
               style="width:100%;box-sizing:border-box;padding:10px 12px;
               border:2px solid ${savedC?'#d1d5db':'#ef4444'};border-radius:8px;
@@ -167,7 +167,7 @@
           <div>
             <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;
               letter-spacing:.05em;display:block;margin-bottom:3px;">Job Role *</label>
-            <input id="ai-is-role" value="${savedR.replace(/"/g,'&quot;').substring(0,80)}"
+            <input id="ai-is-role" maxlength="120" value="${savedR.replace(/"/g,'&quot;').substring(0,80)}"
               placeholder="${savedR?'':'⚠️ Type job role'}"
               style="width:100%;box-sizing:border-box;padding:10px 12px;
               border:2px solid ${savedR?'#d1d5db':'#ef4444'};border-radius:8px;

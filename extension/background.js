@@ -97,7 +97,6 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
   const isCovered = coveredPortals.some(portal => url.includes(portal));
   if (isCovered) return;
 
-
   const hostname = (() => { try { return new URL(tab.url).hostname.toLowerCase(); } catch(e){ return ''; } })();
 
   // TIER 1 — Hard block: never inject on these domains no matter what.
@@ -132,7 +131,30 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     'google.com', 'bing.com', 'duckduckgo.com',
   ];
 
-  if (BLOCKED_DOMAINS.some(d => hostname.includes(d))) return;
+  // Use endsWith for exact domain matching — prevents 'google.com' from
+  // blocking 'docs.google.com', 'careers.google.com' etc.
+  // TIER 2 check FIRST — job domains are never blocked even if they match BLOCKED_DOMAINS
+  // e.g. docs.google.com would be blocked by 'google.com' but it's a job form domain
+  const JOB_DOMAINS_PRIORITY = [
+    'docs.google.com', 'forms.gle', 'forms.google.com',
+    'binary.so', 'typeform.com', 'jotform.com', 'tally.so',
+    'forms.app', 'fillout.com', 'paperform.co', 'cognitoforms.com',
+    'formstack.com', 'wufoo.com',
+    'workday.com', 'myworkdayjobs.com', 'greenhouse.io', 'lever.co',
+    'smartrecruiters.com', 'taleo.net', 'icims.com',
+    'successfactors.com', 'sapsf.eu', 'sapsf.com',
+    'zohorecruit.com', 'freshteam.com', 'keka.com', 'darwinbox.com',
+    'recruitcrm.io', 'bamboohr.com', 'applytojob.com',
+    'careers.google.com', 'amazon.jobs',
+    'wellfound.com', 'angel.co',
+    'apna.co', 'workindia.in', 'iimjobs.com',
+  ];
+  const isPriorityJobDomain = JOB_DOMAINS_PRIORITY.some(d => hostname === d || hostname.endsWith('.' + d));
+
+  // Only check blocked list if NOT a priority job domain
+  if (!isPriorityJobDomain) {
+    if (BLOCKED_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d))) return;
+  }
 
   // TIER 2 — Always inject on form tools and ATS systems
   // NOTE: Portals with dedicated content scripts (linkedin, naukri, internshala etc.)
@@ -158,7 +180,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     'apna.co', 'workindia.in', 'iimjobs.com',
   ];
 
-  const isJobDomain = JOB_DOMAINS.some(d => hostname.includes(d));
+  const isJobDomain = isPriorityJobDomain || JOB_DOMAINS.some(d => hostname.includes(d));
 
   if (!isJobDomain) {
     // TIER 3 — Conditionally inject: URL path OR query string contains job keywords
@@ -240,6 +262,10 @@ function injectUniversalTracker(platformName) {
 
   // Success confirmation phrases — includes Google Forms specific phrases
   const successPhrases = [
+    'thank you for your interest',
+    'someone will be contacting you',
+    'we will be in touch',
+    'we will contact you shortly',
     'application submitted',
     'application received',
     'application complete',
@@ -585,7 +611,7 @@ function injectUniversalTracker(platformName) {
       </div>
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
-        <input id="appliedin-company"
+        <input id="appliedin-company" maxlength="100"
           value="${companyValue}"
           placeholder="e.g. Razorpay, Zomato, TCS..."
           style="width:100%;box-sizing:border-box;padding:10px 12px;
@@ -593,7 +619,7 @@ function injectUniversalTracker(platformName) {
           margin-bottom:4px;color:#111827;outline:none;" />
         ${companyHint}
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;margin-top:12px;">Job role</label>
-        <input id="appliedin-role"
+        <input id="appliedin-role" maxlength="120"
           value="${roleValue}"
           placeholder="e.g. Software Engineer, Data Analyst..."
           style="width:100%;box-sizing:border-box;padding:10px 12px;
@@ -793,7 +819,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 
   try {
     const hostname = new URL(tab.url).hostname.toLowerCase();
-    if (HARD_BLOCKED.some(d => hostname.includes(d))) return;
+    if (HARD_BLOCKED.some(d => hostname === d || hostname.endsWith('.' + d))) return;
   } catch(e) { return; }
 
   // Inject the guarantee scanner
@@ -845,6 +871,10 @@ function guaranteeScanner() {
   if (skipPaths.some(p => path === p || path.startsWith(p + '/'))) return;
 
   const SUCCESS_PHRASES = [
+    'thank you for your interest',        // very common on company forms
+    'someone will be contacting you',     // Infinity Assurance form shown in screenshot
+    'we will be in touch',
+    'we will contact you shortly',
     'your application has been sent',
     'your application has been submitted',
     'application submitted successfully',
@@ -979,7 +1009,7 @@ function guaranteeScanner() {
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
       <div>
         <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:3px;">Company</label>
-        <input id="ai-company" value="${(company||'').replace(/"/g,'')}"
+        <input id="ai-company" maxlength="100" value="${(company||'').replace(/"/g,'')}"
           placeholder="Enter company name"
           style="width:100%;box-sizing:border-box;padding:9px 12px;border:2px solid ${company?'#e5e7eb':'#ef4444'};
           border-radius:8px;font-size:14px;color:#111827;outline:none;font-family:inherit;"/>
@@ -987,7 +1017,7 @@ function guaranteeScanner() {
       </div>
       <div>
         <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:3px;">Job Role</label>
-        <input id="ai-role" value="${(role||'').replace(/"/g,'').substring(0,80)}"
+        <input id="ai-role" maxlength="120" value="${(role||'').replace(/"/g,'').substring(0,80)}"
           placeholder="Enter job role"
           style="width:100%;box-sizing:border-box;padding:9px 12px;border:2px solid ${role?'#e5e7eb':'#ef4444'};
           border-radius:8px;font-size:14px;color:#111827;outline:none;font-family:inherit;"/>

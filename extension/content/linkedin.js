@@ -11,9 +11,6 @@
   const _currentPath = window.location.pathname.toLowerCase();
   if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
 
-  console.log('[AppliedIn] linkedin.js loaded on', window.location.href);
-
-
   // Validate that extracted text is actually a job role/company name
   // and not a success message or page noise
   const NOISE_WORDS = [
@@ -61,7 +58,6 @@
     if (text.includes('hybrid')) return 'Hybrid';
     return 'On-site';
   }
-
 
   // Tracks the URL we already handled — prevents re-asking on every
   // subsequent DOM mutation once a success message is showing.
@@ -119,7 +115,6 @@
         status: 'Applied'
       };
     } catch (e) {
-      console.log('[AppliedIn] getJobDetails threw:', e);
       // Last-resort fallback: try the tab title one more time before
       // giving up completely.
       const tabTitle = getDetailsFromTabTitle();
@@ -146,9 +141,12 @@
   const successPhrases = [
     'your application was sent',
     'application submitted',
-    'you\'ve applied',
+    "you've applied",
     'application was sent to',
-    'successfully applied'
+    'successfully applied',
+    'done',  // LinkedIn sometimes shows just "Done" after Easy Apply
+    'application complete',
+    'your application is complete',
   ];
 
   function cachePendingJob(jobData) {
@@ -177,7 +175,6 @@
     });
   }
 
-
   // Guard: if confirm popup already open (user typing), skip — don't interrupt.
   function isPopupOpen() {
     return !!document.getElementById('appliedin-confirm');
@@ -189,22 +186,30 @@
 
   function handleSuccess() {
     if (lastHandledUrl === window.location.href) return;
+    if (window.__appliedinPopupOpen) return;
     lastHandledUrl = window.location.href;
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
-      console.log('[AppliedIn] jobData for save:', jobData);
+      const hasCleanCompany = jobData && jobData.company &&
+                              jobData.company !== 'Unknown Company' &&
+                              isCleanText(jobData.company);
+      const hasCleanRole = jobData && jobData.role &&
+                           jobData.role !== 'Unknown Role' &&
+                           isCleanText(jobData.role);
 
-      if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
+      if (hasCleanCompany && hasCleanRole) {
+        // Both clean — save silently
         saveApplication(jobData);
-      } else if (jobData) {
-        window.__appliedinCommon.showConfirmPopup(jobData, 'LinkedIn', function () {
-          // user answered — this URL stays marked as handled
-        },
-          function () { observerActive = false; } // lock popup open (reset on close)
-        );
       } else {
-        lastHandledUrl = null;
+        // Missing or noisy data — show popup, never save garbage
+        window.__appliedinCommon.showConfirmPopup(
+          jobData || { company:'', role:'', platform:'LinkedIn',
+                       url:window.location.href, date:new Date().toISOString(), status:'Applied' },
+          'LinkedIn',
+          function () { chrome.storage.local.remove(PENDING_KEY); observerActive = true; },
+          function () { observerActive = false; }
+        );
       }
     });
   }
@@ -254,7 +259,6 @@
     childList: true,
     subtree: true
   });
-
 
   // Check immediately on script load — handles redirect-based success pages
   // where the success message is already in DOM when our script injects

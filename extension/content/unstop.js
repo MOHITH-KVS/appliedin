@@ -11,11 +11,8 @@
   const _currentPath = window.location.pathname.toLowerCase();
   if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
 
-  console.log('[AppliedIn] unstop.js loaded on', window.location.href);
-
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
-
 
   // Validate that extracted text is actually a job role/company name
   // and not a success message or page noise
@@ -125,7 +122,6 @@
         status: 'Applied'
       };
     } catch (e) {
-      console.log('[AppliedIn] getJobDetails threw:', e);
       // Even on error, return SOMETHING so a popup can still be shown —
       // never go completely silent.
       return {
@@ -184,7 +180,6 @@
     return successPhrases.some(phrase => bodyText.toLowerCase().includes(phrase));
   }
 
-
   // Guard: if confirm popup already open (user typing), skip — don't interrupt.
   function isPopupOpen() {
     return !!document.getElementById('appliedin-confirm');
@@ -195,7 +190,6 @@
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();
-      console.log('[AppliedIn] jobData for save:', jobData);
 
       if (jobData && jobData.company && jobData.company !== 'Unknown Company') {
         saveApplication(jobData);
@@ -214,7 +208,6 @@
   // METHOD 0 — Page loaded directly on a success/confirmation URL or state.
   const immediateUrlSuccess = urlLooksLikeSuccess();
   const immediateTextSuccess = textLooksLikeSuccess();
-  console.log('[AppliedIn] immediate check:', { immediateUrlSuccess, immediateTextSuccess, url: window.location.href });
 
   if (immediateUrlSuccess || immediateTextSuccess) {
     setTimeout(handleSuccess, 500);

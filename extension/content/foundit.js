@@ -11,7 +11,6 @@
   const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
-
   // Validate that extracted text is actually a job role/company name
   // and not a success message or page noise
   const NOISE_WORDS = [
@@ -98,7 +97,6 @@
     'application submitted', 'successfully applied', 'you have applied',
     'your application has been sent', 'thank you for applying'
   ];
-
 
   // Guard: if confirm popup already open (user typing), skip — don't interrupt.
   function isPopupOpen() {

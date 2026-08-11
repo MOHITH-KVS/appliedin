@@ -10,7 +10,6 @@
   let lastHandledUrl = null;
   let observerActive = true; // set false once popup opens — locks popup open
 
-
   // Validate that extracted text is actually a job role/company name
   // and not a success message or page noise
   const NOISE_WORDS = [
@@ -86,7 +85,6 @@
     'application submitted', 'successfully applied', 'you have applied',
     'application sent', 'thank you for applying', 'your application has been sent'
   ];
-
 
   // Guard: if confirm popup already open (user typing), skip — don't interrupt.
   function isPopupOpen() {

@@ -44,6 +44,16 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
     );
   }
 
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
   function showNotification(message, type) {
     const existing = document.getElementById('appliedin-notification');
     if (existing) existing.remove();
@@ -125,14 +135,14 @@ window.__appliedinCommon = window.__appliedinCommon || (function () {
       </div>
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Company name</label>
-        <input id="appliedin-company"
+        <input id="appliedin-company" maxlength="100"
           value="${safeCompany}"
           placeholder="Company name"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
           border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;
           margin-bottom:14px;color:#111827;outline:none;" />
         <label style="display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:4px;">Job role</label>
-        <input id="appliedin-role"
+        <input id="appliedin-role" maxlength="120"
           value="${safeRole}"
           placeholder="Job role"
           style="width:100%;box-sizing:border-box;padding:10px 12px;
