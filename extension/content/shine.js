@@ -125,14 +125,20 @@
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Check immediately on script load — handles redirect-based success pages
-  // where the success message is already in DOM when our script injects
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  // On-load check — ONLY on URL paths that look like post-apply confirmation
+  // Never run on listing/search pages to avoid false saves
+  (function() {
+    const _p = window.location.pathname.toLowerCase();
+    const _u = window.location.href.toLowerCase();
+    const isApplyPath = _p.includes('/apply') || _p.includes('saveapply') ||
+                        _p.includes('applyconfirm') || _u.includes('formresponse') ||
+                        _p.includes('/applied') || _u.includes('applysuccess');
+    if (!isApplyPath) return; // never run on listing pages
     setTimeout(function() {
       if (typeof bodyLooksLikeSuccess === 'function' && bodyLooksLikeSuccess()) {
         if (typeof handleSuccess === 'function') handleSuccess();
       }
-    }, 500);
-  }
+    }, 600);
+  })();
 
 })();

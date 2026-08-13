@@ -1,273 +1,224 @@
-// AppliedIn - LinkedIn Content Script
-// Captures ONLY on final submission confirmation.
-// The Easy Apply modal can obscure/replace the underlying job title and
-// company elements once it's open, so we cache those details the moment
-// "Easy Apply" is clicked — while the job card is still visible — and use
-// that cached data at submission time instead of re-scraping the modal.
+// AppliedIn - LinkedIn Content Script v3
+// STRICT rules to prevent false saves on job listing pages:
+// - ONLY saves after clicking "Submit application" or "Done" in Easy Apply modal
+// - ONLY saves after "Your application was sent" appears
+// - Never saves just from opening a job page
+// - "successfully applied" removed — LinkedIn shows this on old applications
+// - "done" only triggers save if user clicked Submit first (submitClicked flag)
 
 (function () {
-  // PATH GUARD: don't track on non-apply pages of this portal
-  const _blockedPaths = ['/messaging', '/notifications', '/feed', '/mynetwork', '/learning', '/in/', '/company/', '/school/', '/groups/'];
-  const _currentPath = window.location.pathname.toLowerCase();
-  if (_blockedPaths.some(p => _currentPath.startsWith(p))) return;
-
-  // Validate that extracted text is actually a job role/company name
-  // and not a success message or page noise
-  const NOISE_WORDS = [
-    'thank you', 'thanks for', 'successfully applied', 'application submitted',
-    'you have applied', 'we have received', 'your application',
-    'congratulations', 'we will be in touch', 'your submission',
+  // PATH GUARD — only run on job detail/apply pages
+  const path = window.location.pathname.toLowerCase();
+  const allowedPaths = ['/jobs/'];
+  const blockedPaths = [
+    '/messaging', '/notifications', '/feed', '/mynetwork',
+    '/learning', '/in/', '/company/', '/school/', '/groups/',
+    '/jobs/search', '/jobs/collections', '/jobs/recommended',
   ];
+  if (!allowedPaths.some(p => path.startsWith(p))) return;
+  if (blockedPaths.some(p => path.startsWith(p))) return;
 
-  function isCleanText(text) {
+  if (window.__appliedinLinkedInInjected) return;
+  window.__appliedinLinkedInInjected = true;
+
+  const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
+  const PENDING_MAX_AGE = 30 * 60 * 1000;
+
+  // KEY FLAG: only allow save if user actually clicked Submit/Done in modal
+  // This prevents observer from saving just because a phrase appears on page
+  let submitClicked = false;
+  let alreadyHandled = false;
+  let observerActive = true;
+
+  // ── Noise filter ──
+  const NOISE = ['thank you','thanks for','successfully applied',
+    'application submitted','you have applied','we have received',
+    'your application','congratulations','we will be in touch',
+    'your submission','done','complete'];
+
+  function isClean(text) {
     if (!text || text.length > 80) return false;
-    const lower = text.toLowerCase();
-    if (NOISE_WORDS.some(w => lower.includes(w))) return false;
+    const l = text.toLowerCase();
+    if (NOISE.some(w => l.includes(w))) return false;
     if (/[.!?]$/.test(text.trim())) return false;
     return true;
   }
-  function extractSalary() {
-    const selectors = [
-      '[class*="salary"]', '[class*="ctc"]', '[class*="stipend"]',
-      '[data-testid*="salary"]', '[class*="compensation"]'
-    ];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el && el.innerText.trim()) return el.innerText.trim();
-    }
-    // Regex scan for salary patterns in page text
-    const match = (document.body.innerText || '').match(
-      /(₹[\d,]+\s*(?:LPA|lpa|L|k|\/month|per month|stipend)?[\s\-–to]*₹?[\d,]*\s*(?:LPA|lpa|L|k)?)/
-    );
-    return match ? match[1].trim() : '';
-  }
 
-  function extractJobType() {
-    const text = (document.body.innerText || '').toLowerCase();
-    if (text.includes('internship')) return 'Internship';
-    if (text.includes('full-time') || text.includes('full time')) return 'Full-Time';
-    if (text.includes('part-time') || text.includes('part time')) return 'Part-Time';
-    if (text.includes('contract')) return 'Contract';
-    if (text.includes('freelance')) return 'Freelance';
+  // ── Extraction ──
+  function extractSalary() {
+    for (const s of ['[class*="salary"]','[class*="ctc"]','[class*="stipend"]',
+                     '[data-testid*="salary"]','[class*="compensation"]']) {
+      const el = document.querySelector(s);
+      if (el?.innerText?.trim()) return el.innerText.trim();
+    }
     return '';
   }
-
+  function extractJobType() {
+    const t = (document.body.innerText||'').toLowerCase();
+    if (t.includes('internship')) return 'Internship';
+    if (t.includes('full-time')||t.includes('full time')) return 'Full-Time';
+    if (t.includes('part-time')||t.includes('part time')) return 'Part-Time';
+    if (t.includes('contract')) return 'Contract';
+    return '';
+  }
   function extractWorkMode() {
-    const text = (document.body.innerText || '').toLowerCase();
-    if (text.includes('work from home') || text.includes('remote')) return 'Remote';
-    if (text.includes('hybrid')) return 'Hybrid';
+    const t = (document.body.innerText||'').toLowerCase();
+    if (t.includes('remote')) return 'Remote';
+    if (t.includes('hybrid')) return 'Hybrid';
     return 'On-site';
   }
-
-  // Tracks the URL we already handled — prevents re-asking on every
-  // subsequent DOM mutation once a success message is showing.
-  let lastHandledUrl = null;
-  let observerActive = true; // set false once popup opens — locks popup open
-  // FIX BUG 2: Use a tab-unique pending key so two tabs (e.g. LinkedIn + Naukri)
-  // never overwrite each other's cached job data.
-  // performance.now() gives microsecond precision unique to each tab's page load.
-  const PENDING_KEY = 'appliedin_pending_' + Math.round(performance.now() * 1000);
-  const PENDING_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
-
-  // LinkedIn's tab title reliably follows "Job Title | Company | LinkedIn"
-  // — much more stable than CSS class names, which change frequently.
-  function getDetailsFromTabTitle() {
-    const parts = (document.title || '').split('|').map(p => p.trim()).filter(Boolean);
-    // parts[0] = role, parts[1] = company, parts[last] usually "LinkedIn"
-    if (parts.length >= 2) {
+  function getDetailsFromTitle() {
+    const parts = (document.title||'').split('|').map(p=>p.trim()).filter(Boolean);
+    // "Software Engineer | Google | LinkedIn" → role=Software Engineer, company=Google
+    if (parts.length >= 3 && parts[parts.length-1].toLowerCase() === 'linkedin') {
       return { role: parts[0], company: parts[1] };
     }
+    if (parts.length >= 2) return { role: parts[0], company: parts[1] };
     return { role: null, company: null };
   }
-
   function getJobDetails() {
     try {
-      const tabTitle = getDetailsFromTabTitle();
-
-      const title =
-        document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim() ||
-        document.querySelector('h1.t-24')?.innerText?.trim() ||
-        document.querySelector('h1')?.innerText?.trim() ||
-        tabTitle.role ||
-        'Unknown Role';
-
+      const tt = getDetailsFromTitle();
       const company =
-        document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim() ||
-        document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim() ||
-        document.querySelector('a[href*="/company/"]')?.innerText?.trim() ||
-        tabTitle.company ||
-        'Unknown Company';
-
+        isClean(document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText?.trim()) ||
+        isClean(document.querySelector('.job-details-jobs-unified-top-card__company-name')?.innerText?.trim()) ||
+        (tt.company && isClean(tt.company) ? tt.company : '') || '';
+      const role =
+        isClean(document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText?.trim()) ||
+        isClean(document.querySelector('h1.t-24')?.innerText?.trim()) ||
+        (tt.role && isClean(tt.role) ? tt.role : '') || '';
       const location =
-        document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() ||
-        'Unknown Location';
-
-      return {
-        company,
-        role: title,
-        location,
-        salary: extractSalary(),
-        jobType: extractJobType(),
-        workMode: extractWorkMode(),
-        platform: 'LinkedIn',
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
-      };
-    } catch (e) {
-      // Last-resort fallback: try the tab title one more time before
-      // giving up completely.
-      const tabTitle = getDetailsFromTabTitle();
-      return {
-        company: tabTitle.company || 'Unknown Company',
-        role: tabTitle.role || 'Unknown Role',
-        location: 'Unknown Location',
-        platform: 'LinkedIn',
-        url: window.location.href,
-        date: new Date().toISOString(),
-        status: 'Applied'
-      };
+        document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText?.trim() || '';
+      return { company, role, location,
+        salary: extractSalary(), jobType: extractJobType(), workMode: extractWorkMode(),
+        platform: 'LinkedIn', url: window.location.href,
+        date: new Date().toISOString(), status: 'Applied' };
+    } catch(e) {
+      const tt = getDetailsFromTitle();
+      return { company: tt.company||'', role: tt.role||'', location:'',
+        platform:'LinkedIn', url:window.location.href,
+        date:new Date().toISOString(), status:'Applied' };
     }
   }
-
-  // Stricter version used ONLY for caching — we don't want to cache
-  // "Unknown Company" as if it were reliable data.
-  function getJobDetailsForCaching() {
-    const jobData = getJobDetails();
-    if (jobData.company === 'Unknown Company' || jobData.role === 'Unknown Role') return null;
-    return jobData;
+  function getCacheable() {
+    const d = getJobDetails();
+    return (d.company && d.role) ? d : null;
   }
 
-  const successPhrases = [
+  // ── Cache ──
+  function cachePending(data) {
+    if (data) chrome.storage.local.set({[PENDING_KEY]:{jobData:data,ts:Date.now()}});
+  }
+  function getPending(cb) {
+    chrome.storage.local.get([PENDING_KEY], r => {
+      const e = r[PENDING_KEY];
+      cb(e && (Date.now()-e.ts)<PENDING_MAX_AGE ? e.jobData : null);
+    });
+  }
+
+  // ── SUCCESS PHRASES — strictly LinkedIn post-apply only ──
+  // "successfully applied" REMOVED — appears on job listing cards
+  // "done" REMOVED — appears on many UI elements
+  const SUCCESS_PHRASES = [
     'your application was sent',
-    'application submitted',
-    "you've applied",
     'application was sent to',
-    'successfully applied',
-    'done',  // LinkedIn sometimes shows just "Done" after Easy Apply
-    'application complete',
-    'your application is complete',
+    'your application has been submitted',
   ];
 
-  function cachePendingJob(jobData) {
-    chrome.storage.local.set({
-      [PENDING_KEY]: { jobData, timestamp: Date.now() }
-    });
+  function isPostApplySuccess() {
+    const bodyText = (document.body?.innerText||'').toLowerCase();
+    return SUCCESS_PHRASES.some(p => bodyText.includes(p));
   }
 
-  function getPendingJob(callback) {
-    chrome.storage.local.get([PENDING_KEY], function (result) {
-      const entry = result[PENDING_KEY];
-      if (entry && (Date.now() - entry.timestamp) < PENDING_MAX_AGE_MS) {
-        callback(entry.jobData);
-      } else {
-        callback(null);
-      }
-    });
-  }
-
-  function saveApplication(jobData) {
-    window.__appliedinCommon.saveApplication(jobData, function () {
-      // duplicate — this URL stays marked as handled, no re-prompt
-    }, function () {
-      // saved — this URL stays marked as handled, no re-prompt
-      chrome.storage.local.remove(PENDING_KEY);
-    });
-  }
-
-  // Guard: if confirm popup already open (user typing), skip — don't interrupt.
-  function isPopupOpen() {
-    return !!document.getElementById('appliedin-confirm');
-  }
-  function bodyLooksLikeSuccess() {
-    const bodyText = (document.body.innerText || '').toLowerCase();
-    return successPhrases.some(p => bodyText.includes(p));
-  }
-
+  // ── Handle confirmed success ──
   function handleSuccess() {
-    if (lastHandledUrl === window.location.href) return;
+    if (alreadyHandled) return;
     if (window.__appliedinPopupOpen) return;
-    lastHandledUrl = window.location.href;
+    // STRICT: only handle if submit was actually clicked
+    if (!submitClicked) return;
+    alreadyHandled = true;
+    observer.disconnect();
 
-    getPendingJob(function (pendingJob) {
-      const jobData = pendingJob || getJobDetails();
-      const hasCleanCompany = jobData && jobData.company &&
-                              jobData.company !== 'Unknown Company' &&
-                              isCleanText(jobData.company);
-      const hasCleanRole = jobData && jobData.role &&
-                           jobData.role !== 'Unknown Role' &&
-                           isCleanText(jobData.role);
-
-      if (hasCleanCompany && hasCleanRole) {
+    getPending(function(pending) {
+      const data = pending || getJobDetails();
+      if (data && data.company && data.role) {
         // Both clean — save silently
-        saveApplication(jobData);
+        chrome.runtime.sendMessage({type:'SAVE_APPLICATION', data}, res => {
+          chrome.storage.local.remove(PENDING_KEY);
+          showToast(res?.duplicate
+            ? '⚠️ Already applied here recently!'
+            : '✅ Saved — ' + data.company,
+            res?.duplicate ? '#f59e0b' : '#22c55e');
+        });
       } else {
-        // Missing or noisy data — show popup, never save garbage
+        // Missing fields — show popup
         window.__appliedinCommon.showConfirmPopup(
-          jobData || { company:'', role:'', platform:'LinkedIn',
-                       url:window.location.href, date:new Date().toISOString(), status:'Applied' },
+          data || {company:'',role:'',platform:'LinkedIn',
+                   url:window.location.href,date:new Date().toISOString(),status:'Applied'},
           'LinkedIn',
-          function () { chrome.storage.local.remove(PENDING_KEY); observerActive = true; },
-          function () { observerActive = false; }
+          function(){ chrome.storage.local.remove(PENDING_KEY); observerActive=true; },
+          function(){ observerActive=false; }
         );
       }
     });
   }
 
-  document.addEventListener('click', function (e) {
-    const button = e.target.closest('button');
-    if (!button) return;
+  function showToast(msg, color) {
+    const t = document.createElement('div');
+    t.style.cssText = `position:fixed;bottom:24px;right:24px;padding:12px 20px;
+      border-radius:8px;font-size:14px;font-weight:500;z-index:2147483647;color:white;
+      background:${color};box-shadow:0 4px 12px rgba(0,0,0,0.2);font-family:-apple-system,sans-serif;`;
+    t.innerText = msg;
+    document.body.appendChild(t);
+    setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3500);
+  }
 
-    const text = button.innerText?.trim().toLowerCase();
-    if (!text) return;
+  // ── Click handler ──
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('button,[role="button"]');
+    if (!btn) return;
+    const text = (btn.innerText||btn.getAttribute('aria-label')||'').trim().toLowerCase();
 
-    // "Easy Apply" just opens the modal — cache the real job details now,
-    // while the underlying job card is still visible and readable.
-    if (text === 'easy apply') {
-      const jobData = getJobDetailsForCaching();
-      if (jobData) cachePendingJob(jobData);
+    // Cache on Easy Apply click
+    if (text === 'easy apply' || text.includes('easy apply')) {
+      cachePending(getCacheable());
       return;
     }
 
-    // Only capture on FINAL submit — not on "Next"/"Review"
-    if (
+    // FINAL submit only — must match exactly
+    const isFinalSubmit =
       text === 'submit application' ||
-      text === 'submit' ||
-      text === 'done'
-    ) {
-      if (lastHandledUrl === window.location.href) return;
+      text === 'submit my application' ||
+      (text === 'done' && document.querySelector('[class*="easy-apply"],'
+        + '[class*="jobs-easy-apply"]'));
 
+    if (isFinalSubmit) {
+      cachePending(getCacheable());
+      submitClicked = true; // unlock save
       setTimeout(() => {
-        if (bodyLooksLikeSuccess()) {
-          handleSuccess();
+        if (alreadyHandled) return;
+        if (isPostApplySuccess()) handleSuccess();
+        else {
+          // Success phrase didn't appear — wait for observer
+          setTimeout(() => {
+            if (!alreadyHandled && isPostApplySuccess()) handleSuccess();
+          }, 2000);
         }
-      }, 2000);
+      }, 1500);
     }
-  });
+  }, true);
 
-  // Watch for success confirmation message in DOM
-  const observer = new MutationObserver(function () {
-    if (window.__appliedinPopupOpen) return; // any popup open — don't interfere
+  // ── Observer — only fires if submitClicked is true ──
+  const observer = new MutationObserver(function() {
     if (!observerActive) return;
-    if (lastHandledUrl === window.location.href) return;
-    if (bodyLooksLikeSuccess()) {
-      setTimeout(handleSuccess, 1000);
-    }
+    if (window.__appliedinPopupOpen) return;
+    if (alreadyHandled) return;
+    if (!submitClicked) return; // STRICT GATE — no submit = no save
+    if (isPostApplySuccess()) setTimeout(handleSuccess, 800);
   });
+  observer.observe(document.body, {childList:true, subtree:true});
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-
-  // Check immediately on script load — handles redirect-based success pages
-  // where the success message is already in DOM when our script injects
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    setTimeout(function() {
-      if (typeof bodyLooksLikeSuccess === 'function' && bodyLooksLikeSuccess()) {
-        if (typeof handleSuccess === 'function') handleSuccess();
-      }
-    }, 500);
-  }
+  // NO on-load check — LinkedIn job pages always have text that could
+  // match success phrases. Only save after explicit user action.
 
 })();
