@@ -283,7 +283,7 @@
 
   // ── MutationObserver — waits for success, THEN shows popup ──
   const observer = new MutationObserver(function() {
-    if (alreadyHandled) return;
+    if (alreadyHandled || window.__appliedinHandled) return;
     if (window.__appliedinPopupOpen) return;
     if (!isSuccess()) return;
     // Success confirmed — show popup now

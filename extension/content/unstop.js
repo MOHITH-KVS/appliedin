@@ -187,6 +187,7 @@
   function handleSuccess() {
     if (lastHandledUrl === window.location.href) return;
     lastHandledUrl = window.location.href;
+    window.__appliedinHandled = true;
 
     getPendingJob(function (pendingJob) {
       const jobData = pendingJob || getJobDetails();

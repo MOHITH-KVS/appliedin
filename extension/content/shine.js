@@ -97,6 +97,7 @@
   function handleSuccess() {
     if (lastHandledUrl === window.location.href) return;
     lastHandledUrl = window.location.href;
+    window.__appliedinHandled = true;
     const data = getJobDetails();
     if (data && data.company !== 'Unknown Company') {
       window.__appliedinCommon.saveApplication(data, null, null);
@@ -120,7 +121,7 @@
   const observer = new MutationObserver(function () {
     if (window.__appliedinPopupOpen) return; // any popup open — don't interfere
     if (!observerActive) return;
-    if (lastHandledUrl === window.location.href) return;
+    if (lastHandledUrl === window.location.href || window.__appliedinHandled) return;
     if (bodyLooksLikeSuccess()) setTimeout(handleSuccess, 1000);
   });
   observer.observe(document.body, { childList: true, subtree: true });

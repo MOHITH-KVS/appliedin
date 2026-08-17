@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AppliedIn",
-  "version": "1.4.1",
+  "version": "1.4.7",
   "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Built for Indian freshers.",
   "permissions": [
     "storage",
@@ -172,6 +172,15 @@
       ],
       "js": [
         "content/google-forms.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/already-applied.js"
       ],
       "run_at": "document_idle"
     }

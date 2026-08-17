@@ -87,9 +87,18 @@
         <button class="modal-close" id="modalClose">✕</button>
       </div>
       <div class="modal-body">
-        <input type="text" id="addCompany" placeholder="Company name *" />
-        <input type="text" id="addRole" placeholder="Job role *" />
-        <input type="text" id="addLocation" placeholder="Location (optional)" />
+        <input type="text" id="addCompany" placeholder="Company name *" maxlength="100" />
+        <input type="text" id="addRole" placeholder="Job role *" maxlength="120" />
+        <input type="text" id="addLocation" placeholder="Location (optional)" maxlength="100" />
+        <div style="position:relative;display:flex;gap:6px;align-items:center;">
+          <input type="url" id="addUrl" placeholder="Job URL (optional) — paste link here" maxlength="500"
+            style="flex:1;font-size:11px;" />
+          <button type="button" id="pasteCurrentUrl" title="Paste current tab URL"
+            style="flex-shrink:0;padding:0 10px;height:32px;background:#eff6ff;border:1px solid #c7d7ff;
+            border-radius:6px;font-size:11px;font-weight:600;color:#1A56FF;cursor:pointer;white-space:nowrap;">
+            📋 Current Tab
+          </button>
+        </div>
         <select id="addPlatform">
           <option value="">Select Platform</option>
           <option value="LinkedIn">LinkedIn</option>

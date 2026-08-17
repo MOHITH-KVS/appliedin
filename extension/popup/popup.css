@@ -545,3 +545,23 @@ body {
   border-color: #1A56FF !important;
   box-shadow: 0 0 0 2px rgba(26,86,255,0.1);
 }
+
+/* ── URL field in modal ── */
+#addUrl {
+  font-size: 11px !important;
+  color: #1A56FF;
+}
+#addUrl::placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* ── URL in edit form ── */
+.edit-url {
+  font-size: 11px !important;
+  color: #1A56FF !important;
+}
+.edit-url::placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}

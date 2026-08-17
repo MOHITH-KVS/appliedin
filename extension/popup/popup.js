@@ -219,17 +219,21 @@ document.addEventListener('DOMContentLoaded', function () {
         `;
         editRow.innerHTML = `
           <input class="edit-company" value="${escapeHtml(app.company)}"
-            placeholder="Company name"
+            placeholder="Company name" maxlength="100"
             style="padding:7px 10px;border:1.5px solid #c7d7ff;border-radius:8px;
             font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
           <input class="edit-role" value="${escapeHtml(app.role)}"
-            placeholder="Job role"
+            placeholder="Job role" maxlength="120"
             style="padding:7px 10px;border:1.5px solid #c7d7ff;border-radius:8px;
             font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
           <input class="edit-salary" value="${escapeHtml(app.salary || '')}"
             placeholder="Salary / Stipend (optional)"
             style="padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:8px;
             font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
+          <input class="edit-url" value="${escapeHtml(app.url || '')}"
+            placeholder="Job URL (optional)"
+            style="padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:8px;
+            font-size:11px;font-family:inherit;color:#1A56FF;outline:none;width:100%;box-sizing:border-box;" />
           <div style="display:flex;gap:6px;">
             <button class="edit-save" style="flex:1;padding:7px;background:#1A56FF;color:white;
               border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
@@ -255,15 +259,17 @@ document.addEventListener('DOMContentLoaded', function () {
         editRow.querySelector('.edit-save').addEventListener('click', function(e) {
           e.stopPropagation();
           const newCompany = editRow.querySelector('.edit-company').value.trim();
-          const newRole = editRow.querySelector('.edit-role').value.trim();
+          const newRole   = editRow.querySelector('.edit-role').value.trim();
           const newSalary = editRow.querySelector('.edit-salary').value.trim();
+          const newUrl    = editRow.querySelector('.edit-url').value.trim();
           if (!newCompany || !newRole) {
             editRow.querySelector('.edit-company').style.border = '1.5px solid #ef4444';
             return;
           }
           allApplications[idx].company = newCompany;
-          allApplications[idx].role = newRole;
-          allApplications[idx].salary = newSalary;
+          allApplications[idx].role    = newRole;
+          allApplications[idx].salary  = newSalary;
+          if (newUrl) allApplications[idx].url = newUrl;
           chrome.storage.local.set({ applications: allApplications }, loadApplications);
         });
 
@@ -349,6 +355,23 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   document.getElementById('modalClose').addEventListener('click', closeModal);
+
+  // Paste current tab URL into URL field
+  document.getElementById('pasteCurrentUrl').addEventListener('click', function () {
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      if (tabs && tabs[0] && tabs[0].url) {
+        const url = tabs[0].url;
+        // Don't paste chrome:// or extension URLs
+        if (url.startsWith('http')) {
+          document.getElementById('addUrl').value = url;
+          document.getElementById('addUrl').style.border = '1.5px solid #22c55e';
+          setTimeout(() => {
+            document.getElementById('addUrl').style.border = '';
+          }, 1500);
+        }
+      }
+    });
+  });
   document.getElementById('btnCancel').addEventListener('click', closeModal);
   document.getElementById('modalOverlay').addEventListener('click', function (e) {
     if (e.target === this) closeModal();
@@ -359,15 +382,17 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('addCompany').value = '';
     document.getElementById('addRole').value = '';
     document.getElementById('addLocation').value = '';
+    document.getElementById('addUrl').value = '';
     document.getElementById('addPlatform').value = '';
     document.getElementById('addStatus').value = 'Applied';
   }
 
   document.getElementById('btnSave').addEventListener('click', function () {
-    const company = document.getElementById('addCompany').value.trim();
-    const role = document.getElementById('addRole').value.trim();
+    const company  = document.getElementById('addCompany').value.trim();
+    const role     = document.getElementById('addRole').value.trim();
     const location = document.getElementById('addLocation').value.trim();
     const platform = document.getElementById('addPlatform').value || 'Other';
+    const manualUrl = document.getElementById('addUrl').value.trim();
     const status = document.getElementById('addStatus').value;
 
     if (!company || !role) {
@@ -377,11 +402,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // FIX BUG 1: duplicate check via IndexedDB
     // (We check allApplications in memory since it's already loaded — fast)
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const isDuplicate = allApplications.some(app =>
-      app.company.toLowerCase() === company.toLowerCase() &&
-      app.role.toLowerCase() === role.toLowerCase() &&
-      new Date(app.date).getTime() > cutoff
+      app.company.toLowerCase().trim() === company.toLowerCase().trim() &&
+      app.role.toLowerCase().trim() === role.toLowerCase().trim() &&
+      new Date(app.date).getTime() > sevenDaysAgo
     );
 
     if (isDuplicate) {
@@ -392,7 +417,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const newApp = {
       company, role,
       location: location || 'Unknown Location',
-      platform, url: '',
+      platform,
+      url: manualUrl || '',
       date: new Date().toISOString(),
       status
     };
