@@ -33,47 +33,54 @@
       );
       if (urlMatch) { showBanner(urlMatch); return; }
 
-      // METHOD 2: Company name match from page
-      const pageText = (document.body?.innerText || '').toLowerCase();
-      const pageTitle = document.title?.toLowerCase() || '';
+      // METHOD 2: Strict company + role match
+      // Must match BOTH company AND role — prevents showing banner for
+      // same role at different companies (e.g. "Data Analyst" at every company)
 
-      // Try to extract company from page
       const companyEl =
+        document.querySelector('[class*="company-name"] a') ||
         document.querySelector('[class*="company-name"]') ||
         document.querySelector('[class*="companyName"]') ||
-        document.querySelector('[class*="employer"]') ||
+        document.querySelector('[class*="employer-name"]') ||
         document.querySelector('meta[property="og:site_name"]');
 
       const pageCompany = (
-        companyEl?.content?.toLowerCase() ||
-        companyEl?.innerText?.toLowerCase() || ''
-      ).trim();
+        companyEl?.content ||
+        companyEl?.innerText || ''
+      ).trim().toLowerCase();
 
-      // Try to extract role from page
       const roleEl =
+        document.querySelector('[class*="job-title"] h1') ||
         document.querySelector('[class*="job-title"]') ||
         document.querySelector('[class*="jobTitle"]') ||
-        document.querySelector('h1') ||
-        document.querySelector('h2');
+        document.querySelector('h1');
 
-      const pageRole = (roleEl?.innerText || '').toLowerCase().trim();
+      const pageRole = (roleEl?.innerText || '').trim().toLowerCase();
 
-      if (!pageCompany && !pageRole) return;
+      if (!pageCompany || !pageRole) return;
 
-      // Find matching application
+      // Find matching application — STRICT: both company AND role must match closely
       const match = apps.find(app => {
-        const appCompany = (app.company || '').toLowerCase();
-        const appRole    = (app.role    || '').toLowerCase();
+        const appCompany = (app.company || '').toLowerCase().trim();
+        const appRole    = (app.role    || '').toLowerCase().trim();
 
-        // Company match
-        const companyMatch = pageCompany &&
-          (pageCompany.includes(appCompany) || appCompany.includes(pageCompany));
+        if (!appCompany || !appRole) return false;
 
-        // Role match (at least 3 words in common)
-        const roleWords = appRole.split(/\s+/).filter(w => w.length > 2);
-        const pageRoleWords = pageRole.split(/\s+/).filter(w => w.length > 2);
-        const commonWords = roleWords.filter(w => pageRoleWords.includes(w));
-        const roleMatch = commonWords.length >= Math.min(2, roleWords.length);
+        // Company must be a strong match — one must contain the other
+        // AND the match must be at least 4 chars (prevents "Inc" matching "Inc" everywhere)
+        const companyMatch =
+          (pageCompany.includes(appCompany) || appCompany.includes(pageCompany)) &&
+          Math.min(pageCompany.length, appCompany.length) >= 4;
+
+        if (!companyMatch) return false;
+
+        // Role must also match — at least half the words in common
+        const appWords  = appRole.split(/\s+/).filter(w => w.length > 2);
+        const pageWords = pageRole.split(/\s+/).filter(w => w.length > 2);
+        if (!appWords.length || !pageWords.length) return false;
+        const common = appWords.filter(w => pageWords.includes(w));
+        // Need majority match — not just one word
+        const roleMatch = common.length >= Math.ceil(appWords.length * 0.6);
 
         return companyMatch && roleMatch;
       });

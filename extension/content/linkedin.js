@@ -5,9 +5,15 @@
 
 (function () {
   const path = window.location.pathname.toLowerCase();
-  if (!path.startsWith('/jobs/')) return;
-  const blockedPaths = ['/jobs/search', '/jobs/collections', '/jobs/recommended'];
-  if (blockedPaths.some(p => path.startsWith(p))) return;
+  // Allow ALL LinkedIn job paths — search results, detail pages, etc.
+  // LinkedIn shows job panel on right side of search results page too
+  // Only block pure non-job paths
+  const hardBlock = [
+    '/messaging', '/notifications', '/feed', '/mynetwork',
+    '/learning', '/in/', '/company/', '/school/', '/groups/',
+    '/pulse/', '/events/', '/jobs/tracker',
+  ];
+  if (hardBlock.some(p => path.startsWith(p))) return;
   if (window.__appliedinLinkedInInjected) return;
   window.__appliedinLinkedInInjected = true;
 
@@ -101,8 +107,13 @@
   // ── SUCCESS PHRASES — only phrases unique to post-submit LinkedIn ──
   const SUCCESS_PHRASES = [
     'your application was sent',
+    'application was sent',
     'application was sent to',
     'your application has been submitted',
+    'application submitted',
+    'you have applied',
+    "you've applied",
+    'application complete',
   ];
   function isSuccess() {
     const t = (document.body?.innerText||'').toLowerCase();
@@ -152,7 +163,8 @@
     if (!btn) return;
     const text = (btn.innerText||btn.getAttribute('aria-label')||'').trim().toLowerCase();
 
-    if (text === 'easy apply' || text.includes('easy apply')) {
+    if (text === 'easy apply' || text.includes('easy apply') ||
+        text === 'apply' || text === 'apply now') {
       setState(STATE.APPLYING);
       cachePending(getJobDetails());
       return;
@@ -230,7 +242,13 @@
   new MutationObserver(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      state = STATE.IDLE; // reset state on navigation
+      // Reset state for new job page
+      if (state < STATE.SAVED) {
+        state = STATE.IDLE;
+      } else {
+        state = STATE.IDLE; // always reset on navigation
+      }
+      chrome.storage.local.remove(PENDING_KEY);
       setTimeout(checkAlreadyApplied, 1500);
     }
   }).observe(document, {subtree:true, childList:true});
