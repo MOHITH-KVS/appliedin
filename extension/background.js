@@ -129,38 +129,49 @@ function injectUniversalTracker(platformName) {
 
   let handled = false;
   let observerActive = true;
+  let submitClicked = false; // only save after explicit submit click
 
   const SUCCESS_PHRASES = [
-    // Application confirmations
-    'your application was sent', 'application was sent',
-    'your application has been sent', 'application has been sent',
-    'your application has been submitted', 'application submitted',
-    'application submitted successfully', 'application successful',
-    'your application is complete', 'application complete',
-    'successfully applied', 'you have successfully applied',
-    'you have applied', "you've applied",
-    'applied successfully', 'application sent successfully',
-    // Thank you variations
-    'thank you for applying', 'thank you for your application',
-    'thanks for applying', 'thanks for submitting',
-    'thank you for submitting', 'thank you for your interest',
-    'thank you for your interest in joining',
-    // Response confirmations
-    'your response has been recorded', 'your response has been submitted',
-    'response recorded', 'form submitted',
-    // Receipt confirmations
-    'we have received your application', 'we have received your submission',
-    'we have received your profile',
-    'your submission has been received', 'submission received',
+    // STRONG confirmations — these only appear AFTER submission, never during form filling
+    'your application was sent',
+    'application was sent',
+    'your application has been sent',
+    'your application has been submitted',
+    'application submitted successfully',
+    'application successful',
+    'successfully applied',
+    'you have successfully applied',
+    'applied successfully',
+    'application sent successfully',
+    // Response confirmations (Google Forms etc.)
+    'your response has been recorded',
+    'your response has been submitted',
+    // Receipt confirmations — specific wording only
+    'we have received your application',
+    'we have received your submission',
+    'your submission has been received',
+    // REMOVED — these appear during form filling:
+    // 'thank you for your interest' — in company intro text
+    // 'we will be in touch' — in company intro text
+    // 'we will review your application' — in company intro text
+    // 'application submitted' — appears in form step indicators
+    // 'application complete' — appears in form progress bars
+    // 'application received' — too generic
+    // 'someone will be contacting you' — in form instructions
+  ];
+
+  // WEAK phrases — only used after submit button confirmed clicked
+  const WEAK_PHRASES = [
+    'thank you for applying',
+    'thank you for your application',
+    'thanks for applying',
+    'thanks for submitting',
+    'thank you for submitting',
+    'application submitted',
+    'application complete',
     'application received',
-    // Company-specific patterns
-    'your application is under review',
-    'we will be in touch', 'we will contact you',
-    'we will review your application',
+    'we will be in touch',
     'someone will be contacting you',
-    'our team will reach out',
-    // Generic success
-    'you are now being considered',
     'your details have been submitted',
     'your information has been submitted',
   ];
@@ -180,12 +191,16 @@ function injectUniversalTracker(platformName) {
 
   function isSuccess() {
     const body = (document.body?.innerText || '').toLowerCase();
+    // Strong phrases — always valid, unambiguous post-submit text
     if (SUCCESS_PHRASES.some(p => body.includes(p))) return true;
+    // Weak phrases — only valid if user actually clicked submit
+    if (submitClicked && WEAK_PHRASES.some(p => body.includes(p))) return true;
     // Check dialogs/modals too
     const dialogs = document.querySelectorAll('[role="dialog"],[class*="modal"],[class*="dialog"]');
     for (const d of dialogs) {
       const t = (d.innerText || '').toLowerCase();
       if (SUCCESS_PHRASES.some(p => t.includes(p))) return true;
+      if (submitClicked && WEAK_PHRASES.some(p => t.includes(p))) return true;
     }
     return false;
   }
@@ -377,17 +392,31 @@ function injectUniversalTracker(platformName) {
   observer.observe(document.body, { childList:true, subtree:true, attributes:true,
     attributeFilter:['class','style','aria-hidden'] });
 
-  // Check on load — catches redirect-based success pages
+  // Check on load — only for STRONG phrases (not weak ones)
+  // This catches redirect-based confirmation pages
+  // But skips active form pages that have intro text with weak phrases
   setTimeout(function() {
-    if (!handled && !window.__appliedinPopupOpen && isSuccess()) handleSuccess();
-  }, 600);
+    if (handled || window.__appliedinPopupOpen) return;
+    const body = (document.body?.innerText || '').toLowerCase();
+    const hasStrongPhrase = SUCCESS_PHRASES.some(p => body.includes(p));
+    // Also check: if page has form inputs, it's still being filled — don't trigger
+    const hasFormInputs = document.querySelectorAll('input[type="text"],input[type="email"],textarea,select').length > 3;
+    if (hasStrongPhrase && !hasFormInputs) handleSuccess();
+  }, 800);
 
-  // Safety poll — every 1s for 3 mins, catches anything observer missed
-  const poll = setInterval(function() {
-    if (handled || window.__appliedinPopupOpen) { clearInterval(poll); return; }
-    if (isSuccess()) { clearInterval(poll); handleSuccess(); }
-  }, 1000);
-  setTimeout(() => clearInterval(poll), 3 * 60 * 1000);
+  // Safety poll — only runs after submitClicked, reduces false positives
+  let poll = null;
+  // Poll starts only when submit is detected
+  const pollStarter = setInterval(function() {
+    if (!submitClicked || handled) return;
+    clearInterval(pollStarter);
+    poll = setInterval(function() {
+      if (handled || window.__appliedinPopupOpen) { clearInterval(poll); return; }
+      if (isSuccess()) { clearInterval(poll); handleSuccess(); }
+    }, 1000);
+    setTimeout(() => { if (poll) clearInterval(poll); }, 2 * 60 * 1000);
+  }, 500);
+  setTimeout(() => clearInterval(pollStarter), 10 * 60 * 1000);
 }
 
 // ══════════════════════════════════════════════════════
@@ -455,22 +484,31 @@ function guaranteeScanner(platformName) {
   if (host.includes('docs.google.com') && !path.includes('/forms/')) return;
 
   const SUCCESS_PHRASES = [
-    'your application was sent','application was sent',
-    'your application has been sent','application has been sent',
-    'your application has been submitted','application submitted',
-    'successfully applied','you have successfully applied',
-    'you have applied',"you've applied",'applied successfully',
-    'thank you for applying','thank you for your application',
-    'thanks for applying','thank you for submitting',
-    'thank you for your interest',
-    'your response has been recorded','response recorded',
-    'we have received your application','we have received your submission',
-    'your submission has been received','submission received',
-    'application received','someone will be contacting you',
-    'we will be in touch','we will contact you shortly',
-    'your details have been submitted',
-    'your information has been submitted',
-    'application complete','application successful',
+    // Strong — unambiguous post-submit phrases
+    'your application was sent',
+    'application was sent',
+    'your application has been sent',
+    'your application has been submitted',
+    'application submitted successfully',
+    'application successful',
+    'successfully applied',
+    'you have successfully applied',
+    'applied successfully',
+    'your response has been recorded',
+    'your response has been submitted',
+    'we have received your application',
+    'we have received your submission',
+    'your submission has been received',
+    // Moderately strong — only valid when no active form inputs
+    'thank you for applying',
+    'thank you for your application',
+    'thanks for applying',
+    'thank you for submitting',
+    'application complete',
+    'someone will be contacting you shortly',
+    // REMOVED — too generic, appear during form filling:
+    // 'application submitted', 'application received',
+    // 'thank you for your interest', 'we will be in touch',
   ];
 
   function isSuccess() {
@@ -485,6 +523,14 @@ function guaranteeScanner(platformName) {
   }
 
   if (!isSuccess()) return; // page has no success content — do nothing
+
+  // FORM FILL GUARD: if page has many active form inputs, user is still
+  // filling the form — don't show popup yet
+  const formInputs = document.querySelectorAll(
+    'input[type="text"]:not([readonly]),input[type="email"]:not([readonly]),' +
+    'input[type="tel"]:not([readonly]),textarea:not([readonly]),select'
+  );
+  if (formInputs.length > 3) return; // still an active form page
 
   // Mark handled
   window.__appliedinHandled = true;
