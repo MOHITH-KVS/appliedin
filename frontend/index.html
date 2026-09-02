@@ -3,24 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AppliedIn — Free Job Application Tracker for Indian Freshers | Chrome Extension</title>
-  <meta name="description" content="Auto-track every job application from LinkedIn, Naukri, Internshala, Indeed, Glassdoor and Unstop. Never forget where you applied. Free Chrome extension built for Indian freshers." />
 
-  <!-- ── SEO META TAGS ── -->
-  <meta name="keywords" content="job application tracker, job tracker India, naukri tracker, linkedin application tracker, internshala tracker, chrome extension job tracker, fresher job tracker India, job application organizer, track job applications India, applied jobs tracker, job search tracker India, free job tracker, job portal tracker India" />
+  <!-- PRIMARY SEO ──────────────────────────────────────── -->
+  <title>AppliedIn — Free Job Application Tracker Chrome Extension for Indian Freshers</title>
+  <meta name="description" content="Never forget where you applied. AppliedIn auto-tracks every job application from LinkedIn, Naukri, Internshala, Indeed, Glassdoor &amp; Unstop. Free Chrome extension for Indian freshers. No signup needed." />
+  <meta name="keywords" content="job application tracker India, free job tracker Chrome extension, naukri application tracker, linkedin easy apply tracker, internshala application tracker, job tracker for freshers India, auto track job applications, chrome extension job search India, applied jobs organizer, job portal tracker 2025, track naukri applications, track linkedin applications, job search tracker Indian students, fresher job tracker" />
   <meta name="author" content="K.V.S. Mohith" />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <meta name="googlebot" content="index, follow" />
   <meta name="theme-color" content="#1A56FF" />
   <link rel="canonical" href="https://appliedin.vercel.app/" />
 
+  <!-- FAVICON & BROWSER ICONS ──────────────────────────── -->
+  <!-- These make the logo appear in browser tab, bookmarks, search results -->
+  <link rel="icon" type="image/png" sizes="32x32" href="https://appliedin.vercel.app/icons/icon128.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="https://appliedin.vercel.app/icons/icon16.png" />
+  <link rel="shortcut icon" href="https://appliedin.vercel.app/icons/icon128.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://appliedin.vercel.app/icons/icon128.png" />
+  <meta name="msapplication-TileImage" content="https://appliedin.vercel.app/icons/icon128.png" />
+  <meta name="msapplication-TileColor" content="#1A56FF" />
+  <link rel="manifest" href="/site.webmanifest" />
+
   <!-- ── OPEN GRAPH (Facebook, WhatsApp, LinkedIn) ── -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://appliedin.vercel.app/" />
   <meta property="og:title" content="AppliedIn — Free Job Application Tracker for Indian Freshers" />
   <meta property="og:description" content="Auto-track every job application from LinkedIn, Naukri, Internshala and more. Never forget where you applied. Free Chrome extension." />
-  <meta property="og:image" content="https://appliedin.vercel.app/icons/icon128.png" />
+  <meta property="og:image" content="https://appliedin.vercel.app/og-image.png" />
   <meta property="og:image:width" content="1200" />
+  <meta property="og:image:alt" content="AppliedIn — Free Job Application Tracker Chrome Extension" />
   <meta property="og:image:height" content="630" />
   <meta property="og:site_name" content="AppliedIn" />
   <meta property="og:locale" content="en_IN" />
@@ -30,7 +41,8 @@
   <meta name="twitter:url" content="https://appliedin.vercel.app/" />
   <meta name="twitter:title" content="AppliedIn — Free Job Application Tracker for Indian Freshers" />
   <meta name="twitter:description" content="Auto-track every job application from LinkedIn, Naukri, Internshala and more. Never forget where you applied. Free Chrome extension." />
-  <meta name="twitter:image" content="https://appliedin.vercel.app/icons/icon128.png" />
+  <meta name="twitter:image" content="https://appliedin.vercel.app/og-image.png" />
+  <meta name="twitter:creator" content="@mohithkvs" />
 
   <!-- ── SCHEMA MARKUP (Google Rich Results) ── -->
   <script type="application/ld+json">
@@ -42,8 +54,8 @@
     "operatingSystem": "Chrome, Edge, Brave",
     "description": "Auto-track every job application from LinkedIn, Naukri, Internshala, Indeed, Glassdoor and Unstop. Free Chrome extension built for Indian freshers.",
     "url": "https://appliedin.vercel.app/",
-    "downloadUrl": "https://github.com/MOHITH-KVS/appliedin",
-    "softwareVersion": "1.0.0",
+    "downloadUrl": "https://github.com/MOHITH-KVS/appliedin/releases/download/v1.0.0/appliedin-extension-v1.0.0.zip",
+    "softwareVersion": "1.5.1",
     "offers": {
       "@type": "Offer",
       "price": "0",
@@ -71,6 +83,49 @@
       "Status tracking",
       "100% private — data stays on device"
     ]
+  }
+  </script>
+
+  <!-- ORGANIZATION SCHEMA — helps Google identify the brand -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "AppliedIn",
+    "url": "https://appliedin.vercel.app/",
+    "logo": "https://appliedin.vercel.app/icons/icon128.png",
+    "sameAs": [
+      "https://github.com/MOHITH-KVS/appliedin",
+      "https://www.linkedin.com/in/mohith-kvs"
+    ],
+    "founder": {
+      "@type": "Person",
+      "name": "K.V.S. Mohith",
+      "jobTitle": "AI & ML Engineer",
+      "alumniOf": "Gayatri Vidya Parishad College, Vizag"
+    }
+  }
+  </script>
+
+  <!-- WEBPAGE SCHEMA — for Google search snippet -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "AppliedIn — Free Job Application Tracker Chrome Extension",
+    "description": "Auto-track every job application from LinkedIn, Naukri, Internshala, Indeed, Glassdoor and Unstop. Free Chrome extension for Indian freshers.",
+    "url": "https://appliedin.vercel.app/",
+    "inLanguage": "en-IN",
+    "isPartOf": {
+      "@type": "WebSite",
+      "name": "AppliedIn",
+      "url": "https://appliedin.vercel.app/"
+    },
+    "about": {
+      "@type": "SoftwareApplication",
+      "name": "AppliedIn"
+    },
+    "dateModified": "2026-09-02"
   }
   </script>
 

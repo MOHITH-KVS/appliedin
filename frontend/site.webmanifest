@@ -1,0 +1,28 @@
+{
+  "name": "AppliedIn — Job Application Tracker",
+  "short_name": "AppliedIn",
+  "description": "Free Chrome extension to auto-track job applications from LinkedIn, Naukri, Internshala and more.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1A56FF",
+  "lang": "en-IN",
+  "icons": [
+    {
+      "src": "/icons/icon16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon48.png",
+      "sizes": "48x48",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
