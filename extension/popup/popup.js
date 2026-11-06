@@ -1,612 +1,218 @@
-// AppliedIn - Popup Script
+(function () {
+  'use strict';
+  const S = AppliedInShared, Store = AppliedInStore, U = AppliedInUI, h = U.h;
+  const $ = id => document.getElementById(id);
+  let apps = [], settings = Store.DEFAULTS, filter = 'all', q = '', limit = 60, openId = null, exportType = 'csv', period = 'all', snackT = null;
 
-document.addEventListener('DOMContentLoaded', function () {
+  async function load() { apps = await Store.getAll(); settings = await Store.settings(); render(); }
 
-  let allApplications = [];
-  let currentFilter = 'all';
-  let currentSearch = '';
-  let currentExportType = ''; // 'csv' or 'excel'
+  // ───────── stats ─────────
+  function startOf(kind) {
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    if (kind === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    if (kind === 'month') d.setDate(1);
+    return d.getTime();
+  }
+  const real = () => apps.filter(a => a.status !== 'Saved');
+  const count = since => real().filter(a => Date.parse(a.date) >= since).length;
 
-  // ── Load Applications ──
-  function loadApplications() {
-    chrome.storage.local.get(['applications'], function (result) {
-      allApplications = result.applications || [];
-      updateStats();
-      renderApplications();
+  function renderStats() {
+    const r = real(), today = count(startOf('day'));
+    $('totalCount').textContent = apps.length + ' total';
+    $('statToday').textContent = today; $('statWeek').textContent = count(startOf('week')); $('statMonth').textContent = count(startOf('month'));
+    const rs = S.replyStats(apps);
+    $('statResp').textContent = rs.replied;
+    $('statRespLbl').textContent = rs.eligible >= 10 ? 'Replies · ' + rs.rate + '%' : 'Replies';
+    $('statReplyBox').title = rs.replied + ' of ' + rs.eligible + ' applications older than a week got a reply. Statuses update when you change them, when you visit your portal “applications” pages, or with Gmail detection (Settings).';
+    const goal = settings.dailyGoal || 10, pct = Math.min(100, Math.round(today / goal * 100));
+    $('goalText').textContent = today >= goal ? 'Goal reached — ' + today + ' today 🎉' : today + ' of ' + goal + ' applications today';
+    $('goalFill').style.width = pct + '%'; $('goalFill').parentElement.classList.toggle('done', today >= goal);
+    const st = U.streak(apps); $('streakText').textContent = st > 1 ? '🔥 ' + st + '-day streak' : '';
+    const att = Store.attention(apps, settings), need = att.due.length + att.soon.length, b = $('attention');
+    b.hidden = !need; b.className = 'strip' + (att.soon.length ? ' warn' : '');
+    if (need) { b.textContent = '⏰ ' + (att.soon.length ? att.soon.length + ' interview' + (att.soon.length > 1 ? 's' : '') + ' soon · ' : '') + att.due.length + ' waiting for a reply — review follow-ups ›'; b.onclick = () => openBoard('followups'); }
+    const bw = $('backupWarn'), last = settings.lastBackupAt || 0, stale = Date.now() - last > 14 * 864e5;
+    bw.hidden = !(apps.length >= 10 && stale);
+    if (!bw.hidden) { bw.textContent = '💾 ' + (last ? 'Last backup ' + Math.floor((Date.now() - last) / 864e5) + ' days ago' : 'You have never backed up') + ' — back up now ›'; bw.onclick = backup; }
+  }
+  function renderChips() {
+    const nav = $('chips'); nav.textContent = '';
+    ['all'].concat(S.STATUSES).forEach(s => {
+      const n = s === 'all' ? apps.length : apps.filter(a => a.status === s).length;
+      if (s !== 'all' && !n && s !== filter) return;
+      nav.appendChild(h('button', { class: 'chip', type: 'button', 'aria-pressed': String(filter === s), text: (s === 'all' ? 'All' : s) + ' ' + n, onclick: () => { filter = s; limit = 60; render(); } }));
     });
   }
 
-  loadApplications();
-
-  // ── Update Stats ──
-  function updateStats() {
-    const now = new Date();
-
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-
-    const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    document.getElementById('statToday').textContent =
-      allApplications.filter(a => new Date(a.date) >= todayStart).length;
-
-    document.getElementById('statYesterday').textContent =
-      allApplications.filter(a => {
-        const d = new Date(a.date);
-        return d >= yesterdayStart && d < todayStart;
-      }).length;
-
-    document.getElementById('statWeek').textContent =
-      allApplications.filter(a => new Date(a.date) >= weekStart).length;
-
-    document.getElementById('statMonth').textContent =
-      allApplications.filter(a => new Date(a.date) >= monthStart).length;
-
-    document.getElementById('totalCount').textContent =
-      `${allApplications.length} Total`;
+  // ───────── list ─────────
+  function visible() {
+    const t = q.trim().toLowerCase();
+    return apps.filter(a => (filter === 'all' || a.status === filter) &&
+      (!t || (a.company + ' ' + a.role + ' ' + a.platform + ' ' + (a.location || '')).toLowerCase().indexOf(t) >= 0));
   }
-
-  // ── Filter by Period ──
-  function filterByPeriod(period) {
-    const now = new Date();
-
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-
-    const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const yearStart = new Date(now.getFullYear(), 0, 1);
-
-    switch (period) {
-      case 'today':
-        return allApplications.filter(a => new Date(a.date) >= todayStart);
-      case 'yesterday':
-        return allApplications.filter(a => {
-          const d = new Date(a.date);
-          return d >= yesterdayStart && d < todayStart;
-        });
-      case 'week':
-        return allApplications.filter(a => new Date(a.date) >= weekStart);
-      case 'month':
-        return allApplications.filter(a => new Date(a.date) >= monthStart);
-      case 'year':
-        return allApplications.filter(a => new Date(a.date) >= yearStart);
-      case 'all':
-      default:
-        return allApplications;
-    }
+  function dueFlag(a) {
+    if (a.status !== 'Applied' && a.status !== 'In Review') return '';
+    const days = Math.floor((Date.now() - Date.parse(a.lastStatusChange || a.date)) / 864e5);
+    return days >= settings.followUpDays && !a.followUpDismissed ? 'Follow up (' + days + 'd)' : '';
   }
-
-  // ── Render Applications ──
-  function renderApplications() {
-    const list = document.getElementById('applicationsList');
-    const emptyState = document.getElementById('emptyState');
-
-    let filtered = allApplications;
-
-    if (currentFilter !== 'all') {
-      filtered = filtered.filter(app => app.status === currentFilter);
-    }
-
-    if (currentSearch.trim() !== '') {
-      const query = currentSearch.toLowerCase();
-      filtered = filtered.filter(app =>
-        app.company.toLowerCase().includes(query) ||
-        app.role.toLowerCase().includes(query) ||
-        (app.platform && app.platform.toLowerCase().includes(query)) ||
-        (app.location && app.location.toLowerCase().includes(query))
-      );
-    }
-
-    list.innerHTML = '';
-
-    if (filtered.length === 0) {
-      emptyState.style.display = 'flex';
-      list.style.display = 'none';
-      return;
-    }
-
-    emptyState.style.display = 'none';
-    list.style.display = 'flex';
-
-    filtered.forEach(function (app) {
-      const realIndex = allApplications.findIndex(a =>
-        a.company === app.company &&
-        a.role === app.role &&
-        a.date === app.date
-      );
-
-      const card = document.createElement('div');
-      card.className = 'app-card';
-      // Build optional tags for salary, jobType, workMode
-      const salaryTag = app.salary
-        ? `<span class="app-tag tag-salary">💰 ${escapeHtml(app.salary)}</span>` : '';
-      const jobTypeTag = app.jobType
-        ? `<span class="app-tag tag-jobtype">${escapeHtml(app.jobType)}</span>` : '';
-      const workModeTag = app.workMode && app.workMode !== 'On-site'
-        ? `<span class="app-tag tag-workmode">${escapeHtml(app.workMode)}</span>` : '';
-      const tagsHtml = (salaryTag || jobTypeTag || workModeTag)
-        ? `<div class="app-tags">${salaryTag}${jobTypeTag}${workModeTag}</div>` : '';
-
-      card.innerHTML = `
-        <div class="app-card-top">
-          <div class="app-company">${escapeHtml(app.company)}</div>
-          <div class="card-actions">
-            <button class="btn-edit" data-index="${realIndex}" title="Edit">✏️</button>
-            <button class="btn-delete" data-index="${realIndex}" title="Delete">🗑</button>
-          </div>
-        </div>
-        <div class="app-role" title="${escapeHtml(app.role)}">${escapeHtml(app.role)}</div>
-        ${tagsHtml}
-        <div class="app-card-bottom">
-          <div class="app-meta">
-            <span class="app-platform">${escapeHtml(app.platform || 'Unknown')}</span>
-            <div class="app-dot"></div>
-            <span class="app-date" title="${escapeHtml(formatDateFull(app.date))}">${formatDate(app.date)}</span>
-          </div>
-          <select class="status-select status-badge status-${app.status.replace(' ', '-')}"
-            data-index="${realIndex}">
-            <option value="Applied" ${app.status === 'Applied' ? 'selected' : ''}>Applied</option>
-            <option value="In Review" ${app.status === 'In Review' ? 'selected' : ''}>In Review</option>
-            <option value="Interview" ${app.status === 'Interview' ? 'selected' : ''}>Interview</option>
-            <option value="Shortlisted" ${app.status === 'Shortlisted' ? 'selected' : ''}>Shortlisted</option>
-            <option value="Rejected" ${app.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
-          </select>
-        </div>
-      `;
-
-      card.addEventListener('click', function (e) {
-        if (
-          e.target.classList.contains('btn-delete') ||
-          e.target.classList.contains('btn-edit') ||
-          e.target.classList.contains('status-select') ||
-          e.target.closest('.delete-confirm-row') ||
-          e.target.closest('.edit-form-row')  // don't open URL when editing
-        ) return;
-        if (app.url) chrome.tabs.create({ url: app.url });
-      });
-
-      list.appendChild(card);
-    });
-
-    // Status change
-    document.querySelectorAll('.status-select').forEach(function (select) {
-      select.addEventListener('change', function () {
-        const idx = parseInt(this.dataset.index);
-        allApplications[idx].status = this.value;
-        chrome.storage.local.set({ applications: allApplications }, loadApplications);
-      });
-    });
-
-    // ── Edit button — opens inline edit form ──
-    document.querySelectorAll('.btn-edit').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const idx = parseInt(this.dataset.index);
-        const app = allApplications[idx];
-        const card = this.closest('.app-card');
-
-        // Toggle: if edit form already open, close it
-        const existing = card.querySelector('.edit-form-row');
-        if (existing) { existing.remove(); return; }
-
-        // Remove any open delete confirms first
-        const delRow = card.querySelector('.delete-confirm-row');
-        if (delRow) delRow.remove();
-
-        const editRow = document.createElement('div');
-        editRow.className = 'edit-form-row';
-        editRow.style.cssText = `
-          padding: 10px 0 4px 0;
-          border-top: 1px solid #e0e7ff;
-          margin-top: 8px;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        `;
-        editRow.innerHTML = `
-          <input class="edit-company" value="${escapeHtml(app.company)}"
-            placeholder="Company name" maxlength="100"
-            style="padding:7px 10px;border:1.5px solid #c7d7ff;border-radius:8px;
-            font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
-          <input class="edit-role" value="${escapeHtml(app.role)}"
-            placeholder="Job role" maxlength="120"
-            style="padding:7px 10px;border:1.5px solid #c7d7ff;border-radius:8px;
-            font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
-          <input class="edit-salary" value="${escapeHtml(app.salary || '')}"
-            placeholder="Salary / Stipend (optional)"
-            style="padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:8px;
-            font-size:12px;font-family:inherit;color:#111827;outline:none;width:100%;box-sizing:border-box;" />
-          <input class="edit-url" value="${escapeHtml(app.url || '')}"
-            placeholder="Job URL (optional)"
-            style="padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:8px;
-            font-size:11px;font-family:inherit;color:#1A56FF;outline:none;width:100%;box-sizing:border-box;" />
-          <div style="display:flex;gap:6px;">
-            <button class="edit-save" style="flex:1;padding:7px;background:#1A56FF;color:white;
-              border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
-              ✅ Save
-            </button>
-            <button class="edit-cancel" style="flex:1;padding:7px;background:#f3f4f6;color:#374151;
-              border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
-              Cancel
-            </button>
-          </div>
-        `;
-
-        card.appendChild(editRow);
-
-        // Block ALL events inside edit form from bubbling up to card click handler
-        // Without this, clicking any input triggers card.click → opens job URL
-        editRow.addEventListener('click',     function(e) { e.stopPropagation(); });
-        editRow.addEventListener('mousedown', function(e) { e.stopPropagation(); });
-        editRow.addEventListener('keydown',   function(e) { e.stopPropagation(); });
-
-        editRow.querySelector('.edit-company').focus();
-
-        editRow.querySelector('.edit-save').addEventListener('click', function(e) {
-          e.stopPropagation();
-          const newCompany = editRow.querySelector('.edit-company').value.trim();
-          const newRole   = editRow.querySelector('.edit-role').value.trim();
-          const newSalary = editRow.querySelector('.edit-salary').value.trim();
-          const newUrl    = editRow.querySelector('.edit-url').value.trim();
-          if (!newCompany || !newRole) {
-            editRow.querySelector('.edit-company').style.border = '1.5px solid #ef4444';
-            return;
-          }
-          allApplications[idx].company = newCompany;
-          allApplications[idx].role    = newRole;
-          allApplications[idx].salary  = newSalary;
-          if (newUrl) allApplications[idx].url = newUrl;
-          chrome.storage.local.set({ applications: allApplications }, loadApplications);
-        });
-
-        editRow.querySelector('.edit-cancel').addEventListener('click', function(e) {
-          e.stopPropagation();
-          editRow.remove();
-        });
-      });
-    });
-
-    // FIX BUG 3: Delete with inline confirm — no window.confirm() which is
-    // blocked in MV3 extension popups on some Chrome versions.
-    document.querySelectorAll('.btn-delete').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const idx = parseInt(this.dataset.index);
-        const card = this.closest('.app-card');
-        const company = allApplications[idx].company;
-
-        // If inline confirm already showing on this card, remove it
-        const existing = card.querySelector('.delete-confirm-row');
-        if (existing) { existing.remove(); return; }
-
-        // Build inline confirm row
-        const confirmRow = document.createElement('div');
-        confirmRow.className = 'delete-confirm-row';
-        confirmRow.style.cssText = `
-          display:flex; align-items:center; justify-content:space-between;
-          gap:8px; padding:8px 0 0 0; border-top:1px solid #fee2e2;
-          margin-top:8px;
-        `;
-        confirmRow.innerHTML = `
-          <span style="font-size:12px;color:#ef4444;font-weight:500;">
-            Delete "${company}"?
-          </span>
-          <div style="display:flex;gap:6px;">
-            <button class="confirm-yes" style="
-              padding:4px 12px;background:#ef4444;color:white;
-              border:none;border-radius:6px;font-size:12px;
-              font-weight:600;cursor:pointer;">Yes</button>
-            <button class="confirm-no" style="
-              padding:4px 12px;background:#f3f4f6;color:#374151;
-              border:none;border-radius:6px;font-size:12px;
-              font-weight:600;cursor:pointer;">No</button>
-          </div>
-        `;
-
-        card.appendChild(confirmRow);
-
-        confirmRow.querySelector('.confirm-yes').addEventListener('click', function(e) {
-          e.stopPropagation();
-          allApplications.splice(idx, 1);
-          chrome.storage.local.set({ applications: allApplications }, loadApplications);
-        });
-        confirmRow.querySelector('.confirm-no').addEventListener('click', function(e) {
-          e.stopPropagation();
-          confirmRow.remove();
-        });
-      });
-    });
+  function statusSelect(a, cls) {
+    const sel = h('select', { class: 'st s-' + U.slug(a.status), 'aria-label': 'Status', onclick: e => e.stopPropagation(), onkeydown: e => e.stopPropagation(), onchange: async e => {
+      await Store.update(a.id, { status: e.target.value }); await load();
+    } }, S.STATUSES.map(s => h('option', { value: s, text: s, selected: s === a.status })));
+    sel.value = a.status; return sel;
   }
-
-  // ── Search ──
-  document.getElementById('searchInput').addEventListener('input', function () {
-    currentSearch = this.value;
-    renderApplications();
-  });
-
-  // ── Filter Tabs ──
-  document.querySelectorAll('.tab').forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      this.classList.add('active');
-      currentFilter = this.dataset.filter;
-      renderApplications();
-    });
-  });
-
-  // ── Manual Add ──
-  document.getElementById('btnAdd').addEventListener('click', function () {
-    document.getElementById('modalOverlay').style.display = 'flex';
-    document.getElementById('addCompany').focus();
-  });
-
-  document.getElementById('modalClose').addEventListener('click', closeModal);
-
-  // Paste current tab URL into URL field
-  document.getElementById('pasteCurrentUrl').addEventListener('click', function () {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      if (tabs && tabs[0] && tabs[0].url) {
-        const url = tabs[0].url;
-        // Don't paste chrome:// or extension URLs
-        if (url.startsWith('http')) {
-          document.getElementById('addUrl').value = url;
-          document.getElementById('addUrl').style.border = '1.5px solid #22c55e';
-          setTimeout(() => {
-            document.getElementById('addUrl').style.border = '';
-          }, 1500);
-        }
-      }
-    });
-  });
-  document.getElementById('btnCancel').addEventListener('click', closeModal);
-  document.getElementById('modalOverlay').addEventListener('click', function (e) {
-    if (e.target === this) closeModal();
-  });
-
-  function closeModal() {
-    document.getElementById('modalOverlay').style.display = 'none';
-    document.getElementById('addCompany').value = '';
-    document.getElementById('addRole').value = '';
-    document.getElementById('addLocation').value = '';
-    document.getElementById('addUrl').value = '';
-    document.getElementById('addPlatform').value = '';
-    document.getElementById('addStatus').value = 'Applied';
+  function toLocalInput(iso, dateOnly) {
+    if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return '';
+    const p = n => String(n).padStart(2, '0'), day = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    return dateOnly ? day : day + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
+  function fromLocalInput(v) { if (!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d.toISOString(); }
 
-  document.getElementById('btnSave').addEventListener('click', function () {
-    const company  = document.getElementById('addCompany').value.trim();
-    const role     = document.getElementById('addRole').value.trim();
-    const location = document.getElementById('addLocation').value.trim();
-    const platform = document.getElementById('addPlatform').value || 'Other';
-    const manualUrl = document.getElementById('addUrl').value.trim();
-    const status = document.getElementById('addStatus').value;
-
-    if (!company || !role) {
-      alert('Please enter company name and job role.');
-      return;
-    }
-
-    // FIX BUG 1: duplicate check via IndexedDB
-    // (We check allApplications in memory since it's already loaded — fast)
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const isDuplicate = allApplications.some(app =>
-      app.company.toLowerCase().trim() === company.toLowerCase().trim() &&
-      app.role.toLowerCase().trim() === role.toLowerCase().trim() &&
-      new Date(app.date).getTime() > sevenDaysAgo
-    );
-
-    if (isDuplicate) {
-      alert('⚠️ You already applied here recently!');
-      return;
-    }
-
-    const newApp = {
-      company, role,
-      location: location || 'Unknown Location',
-      platform,
-      url: manualUrl || '',
-      date: new Date().toISOString(),
-      status
+  function detail(a) {
+    const f = {
+      company: h('input', { value: a.company }), role: h('input', { value: a.role }), location: h('input', { value: a.location || '' }),
+      salary: h('input', { value: a.salary || '' }), url: h('input', { type: 'url', value: a.url || '' }),
+      interview: h('input', { type: 'datetime-local', value: toLocalInput(a.interviewDate) }),
+      follow: h('input', { type: 'date', value: toLocalInput(a.followUpDate, true) }),
+      notes: h('textarea', { placeholder: 'Recruiter name, salary talk, things to prepare…' })
     };
+    f.notes.value = a.notes || '';
+    ['company', 'role', 'location', 'salary', 'url'].forEach(k => { f[k].value = a[k] || ''; });
+    const L = (t, el) => [h('label', { text: t }), el];
+    return h('div', { class: 'detail' },
+      h('div', { class: 'two' }, h('div', null, L('Company', f.company)), h('div', null, L('Role', f.role))),
+      h('div', { class: 'two' }, h('div', null, L('Location', f.location)), h('div', null, L('Salary / stipend', f.salary))),
+      L('Job link', f.url),
+      h('div', { class: 'two' }, h('div', null, L('Interview date', f.interview)), h('div', null, L('Follow up on', f.follow))),
+      L('Notes', f.notes),
+      a.jd ? h('details', { class: 'jd' }, h('summary', { text: 'Saved job description' }), h('pre', { text: a.jd })) : null,
+      h('div', { class: 'acts' },
+        h('button', { class: 'primary', type: 'button', text: 'Save changes', onclick: async () => {
+          if (!f.company.value.trim() || !f.role.value.trim()) return snack('Company and role are required');
+          await Store.update(a.id, { company: f.company.value.trim(), role: f.role.value.trim(), location: f.location.value.trim(), salary: f.salary.value.trim(),
+            url: f.url.value.trim(), interviewDate: fromLocalInput(f.interview.value), followUpDate: fromLocalInput(f.follow.value), notes: f.notes.value });
+          openId = null; await load(); snack('Saved');
+        } }),
+        a.url ? h('button', { type: 'button', text: 'Open job', onclick: () => chrome.tabs.create({ url: a.url }) }) : null,
+        h('button', { type: 'button', text: 'Search my email', title: 'Opens Gmail searching for this company', onclick: () => chrome.tabs.create({ url: 'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent('"' + a.company + '"') }) }),
+        (a.status === 'Applied' || a.status === 'In Review') && !a.followUpDismissed ? h('button', { type: 'button', text: 'Stop reminders', onclick: async () => { await Store.update(a.id, { followUpDismissed: true }); await load(); } }) : null,
+        h('button', { class: 'danger', type: 'button', text: 'Delete', onclick: () => del(a) })));
+  }
+  async function del(a) {
+    const rec = await Store.get(a.id); await Store.remove(a.id); if (openId === a.id) openId = null; await load();
+    snack('Deleted ' + a.company, 'Undo', async () => { await Store.restore(rec); await load(); });
+  }
+  function card(a) {
+    const flag = dueFlag(a), open = openId === a.id;
+    const tags = [a.platform, a.jobType, a.workMode].filter(Boolean).map(t => h('span', { class: 'tag', text: t }));
+    return h('article', { class: 'app' + (open ? ' open' : '') },
+      h('div', { class: 'app-h', role: 'button', tabindex: '0', 'aria-expanded': String(open),
+        onclick: () => { openId = open ? null : a.id; render(); },
+        onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openId = open ? null : a.id; render(); } } },
+        h('div', { class: 'app-m' },
+          h('div', { class: 'co', text: a.company }), h('div', { class: 'ro', text: a.role }),
+          h('div', { class: 'meta' }, tags, U.fmtDate(a.date), flag ? h('span', { class: 'flag', text: ' · ' + flag }) : null,
+            a.interviewDate ? h('span', { class: 'flag', text: ' · Interview ' + U.fmtDate(a.interviewDate) }) : null)),
+        h('div', { class: 'app-r', onclick: e => e.stopPropagation(), onkeydown: e => e.stopPropagation() }, statusSelect(a),
+          h('div', { class: 'app-btns' },
+            h('button', { class: 'ib', type: 'button', title: 'Edit', 'aria-label': 'Edit ' + a.company, text: '✎', onclick: () => { openId = open ? null : a.id; render(); } }),
+            h('button', { class: 'ib del', type: 'button', title: 'Delete', 'aria-label': 'Delete ' + a.company, text: '🗑', onclick: () => del(a) })))),
+      open ? detail(a) : null);
+  }
+  function renderList() {
+    const list = $('list'); list.textContent = '';
+    const v = visible(); $('empty').hidden = v.length > 0;
+    $('emptyMsg').textContent = apps.length ? 'No applications match this search or filter.' : 'Apply on LinkedIn, Naukri or Internshala and your applications appear here automatically. You can also add one by hand.';
+    v.slice(0, limit).forEach(a => list.appendChild(card(a)));
+    if (v.length > limit) list.appendChild(h('button', { class: 'more', type: 'button', text: 'Show ' + Math.min(60, v.length - limit) + ' more of ' + (v.length - limit), onclick: () => { limit += 60; renderList(); } }));
+  }
+  function render() { renderStats(); renderChips(); renderList(); }
 
-    allApplications.unshift(newApp);
-    chrome.storage.local.set({ applications: allApplications }, function () {
-      closeModal();
-      loadApplications();
-    });
-  });
-
-  // ── Export Modal ──
-  function openExportModal(type) {
-    currentExportType = type;
-    document.getElementById('exportModalTitle').textContent =
-      type === 'csv' ? '⬇ Export CSV' : '📊 Export Excel';
-    document.getElementById('exportModal').style.display = 'flex';
-    updatePeriodCount();
+  // ───────── snackbar ─────────
+  function snack(msg, label, fn) {
+    const s = $('snack'); s.textContent = ''; s.hidden = false;
+    s.appendChild(h('span', { text: msg }));
+    if (label) s.appendChild(h('button', { type: 'button', text: label, onclick: () => { s.hidden = true; fn(); } }));
+    clearTimeout(snackT); snackT = setTimeout(() => { s.hidden = true; }, 6000);
   }
 
-  function closeExportModal() {
-    document.getElementById('exportModal').style.display = 'none';
-    document.querySelector('input[name="exportPeriod"][value="all"]').checked = true;
+  // ───────── add job ─────────
+  function openAdd() { ['addCompany', 'addRole', 'addLocation', 'addSalary', 'addUrl'].forEach(i => $(i).value = ''); $('addErr').hidden = true; $('addForce').hidden = true; $('addStatus').value = 'Applied'; $('addModal').hidden = false; $('addCompany').focus(); }
+  async function saveAdd(force) {
+    const company = $('addCompany').value.trim(), role = $('addRole').value.trim(), err = $('addErr');
+    if (!company || !role) { err.textContent = 'Enter the company and the job role.'; err.hidden = false; return; }
+    const url = $('addUrl').value.trim();
+    if (url && !/^https?:\/\//i.test(url)) { err.textContent = 'The job link must start with http:// or https://'; err.hidden = false; return; }
+    const r = await Store.add({ company, role, location: $('addLocation').value.trim(), salary: $('addSalary').value.trim(), url, platform: $('addPlatform').value, status: $('addStatus').value, source: 'manual' }, { force: force === true });
+    if (r.error) { err.textContent = r.error; err.hidden = false; return; }
+    if (r.duplicate) { err.textContent = 'You already have ' + r.existing.company + ' — ' + r.existing.role + ' (' + r.existing.status + ', ' + U.fmtDate(r.existing.date) + '), matched by ' + r.reason + '. If this is a different job, press “Add anyway”.'; err.hidden = false; $('addForce').hidden = false; return; }
+    $('addModal').hidden = true; await load(); snack(r.promoted ? 'Moved to Applied' : 'Added ' + company);
   }
 
-  function updatePeriodCount() {
-    const period = document.querySelector('input[name="exportPeriod"]:checked')?.value || 'all';
-    const count = filterByPeriod(period).length;
-    document.getElementById('periodCount').textContent =
-      `${count} application${count !== 1 ? 's' : ''} will be exported`;
+  // ───────── export / backup ─────────
+  const PERIODS = [['all', 'All applications'], ['today', 'Today'], ['week', 'This week'], ['month', 'This month']];
+  function exportList() {
+    const since = period === 'all' ? 0 : startOf(period === 'today' ? 'day' : period);
+    return apps.filter(a => Date.parse(a.date) >= since);
   }
-
-  // Period radio change
-  document.querySelectorAll('input[name="exportPeriod"]').forEach(function (radio) {
-    radio.addEventListener('change', updatePeriodCount);
-  });
-
-  document.getElementById('exportModalClose').addEventListener('click', closeExportModal);
-  document.getElementById('exportCancel').addEventListener('click', closeExportModal);
-  document.getElementById('exportModal').addEventListener('click', function (e) {
-    if (e.target === this) closeExportModal();
-  });
-
-  document.getElementById('btnExport').addEventListener('click', function () {
-    if (allApplications.length === 0) {
-      alert('No applications to export.');
-      return;
+  function openExport(type) {
+    exportType = type; period = 'all'; $('exportTitle').textContent = 'Export to ' + (type === 'csv' ? 'CSV' : 'Excel');
+    const box = $('periods'); box.textContent = '';
+    PERIODS.forEach(p => box.appendChild(h('button', { class: 'period', type: 'button', 'aria-pressed': String(period === p[0]), text: p[1], onclick: () => { period = p[0]; [].forEach.call(box.children, (b, i) => b.setAttribute('aria-pressed', String(PERIODS[i][0] === period))); $('periodCount').textContent = exportList().length + ' applications will be exported.'; } })));
+    $('periodCount').textContent = exportList().length + ' applications will be exported.';
+    $('exportModal').hidden = false;
+  }
+  async function doExport() {
+    const list = exportList();
+    if (!list.length) return snack('Nothing to export for this period');
+    if (exportType === 'csv') U.download('appliedin-' + U.stamp() + '.csv', new Blob([U.toCSV(list)], { type: 'text/csv;charset=utf-8' }));
+    else {
+      if (!window.XLSX) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = '../xlsx.full.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); }).catch(() => {});
+      if (!window.XLSX) return snack('Excel export could not load — use CSV instead');
+      const ws = XLSX.utils.aoa_to_sheet([U.COLS].concat(list.map(U.rowOf)));
+      ws['!cols'] = [24, 30, 18, 14, 14, 12, 12, 13, 20, 12, 20, 30, 40].map(w => ({ wch: w }));
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Applications');
+      XLSX.writeFile(wb, 'appliedin-' + U.stamp() + '.xlsx');
     }
-    openExportModal('csv');
-  });
-
-  document.getElementById('btnExcel').addEventListener('click', function () {
-    if (allApplications.length === 0) {
-      alert('No applications to export.');
-      return;
-    }
-    openExportModal('excel');
-  });
-
-  document.getElementById('exportDownload').addEventListener('click', function () {
-    const period = document.querySelector('input[name="exportPeriod"]:checked')?.value || 'all';
-    const data = filterByPeriod(period);
-
-    if (data.length === 0) {
-      alert('No applications found for this period.');
-      return;
-    }
-
-    if (currentExportType === 'csv') {
-      downloadCSV(data);
-    } else {
-      downloadExcel(data);
-    }
-
-    closeExportModal();
-  });
-
-  // ── Download CSV ──
-  function downloadCSV(data) {
-    const headers = ['Company', 'Role', 'Location', 'Platform', 'Salary', 'Job Type', 'Work Mode', 'Status', 'Date Applied', 'URL'];
-    const rows = data.map(app => [
-      `"${app.company}"`,
-      `"${app.role}"`,
-      `"${app.location || ''}"`,
-      `"${app.platform || ''}"`,
-      `"${app.salary || ''}"`,
-      `"${app.jobType || ''}"`,
-      `"${app.workMode || ''}"`,
-      `"${app.status}"`,
-      `"${formatDateFull(app.date)}"`,
-      `"${app.url || ''}"`
-    ]);
-
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `AppliedIn_${formatDateFile(new Date())}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    $('exportModal').hidden = true; snack('Exported ' + list.length + ' applications');
+  }
+  async function backup() { await Store.saveSettings({ lastBackupAt: Date.now() }); settings = await Store.settings(); render(); U.download('appliedin-backup-' + U.stamp() + '.json', new Blob([JSON.stringify(await Store.exportAll(), null, 2)], { type: 'application/json' })); snack('Backup downloaded — keep it somewhere safe'); }
+  async function restore(file) {
+    try {
+      const j = JSON.parse(await file.text());
+      const list = Array.isArray(j) ? j : j.applications;
+      if (!Array.isArray(list)) throw new Error('bad');
+      const r = await Store.importMany(list); await load();
+      snack('Restored ' + r.added + ' applications' + (r.skipped ? ' (' + r.skipped + ' already existed)' : ''));
+    } catch (e) { snack('That file is not an AppliedIn backup'); }
   }
 
-  // ── Download Excel — FIX BUG 4: lazy load xlsx only when needed ──
-  function downloadExcel(data) {
-    const btn = document.getElementById('exportDownload');
-    const originalText = btn.textContent;
-    btn.textContent = 'Loading...';
-    btn.disabled = true;
-
-    function doExport() {
-      const rows = [
-        ['Company', 'Role', 'Location', 'Platform', 'Salary', 'Job Type', 'Work Mode', 'Status', 'Date Applied', 'Job URL']
-      ];
-      data.forEach(app => {
-        rows.push([
-          app.company || '',
-          app.role || '',
-          app.location || '',
-          app.platform || '',
-          app.salary || '',
-          app.jobType || '',
-          app.workMode || '',
-          app.status || '',
-          formatDateFull(app.date),
-          app.url || ''
-        ]);
-      });
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [
-        { wch: 25 }, { wch: 30 }, { wch: 20 }, { wch: 15 },
-        { wch: 18 }, { wch: 14 }, { wch: 12 },
-        { wch: 15 }, { wch: 22 }, { wch: 40 }
-      ];
-      XLSX.utils.book_append_sheet(wb, ws, 'Applications');
-      XLSX.writeFile(wb, `AppliedIn_${formatDateFile(new Date())}.xlsx`);
-      btn.textContent = originalText;
-      btn.disabled = false;
-    }
-
-    // If already loaded, use it directly
-    if (typeof XLSX !== 'undefined') {
-      doExport();
-      return;
-    }
-
-    // Otherwise inject script dynamically — loads only once, on first Excel export
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('../xlsx.full.min.js');
-    script.onload = function() { doExport(); };
-    script.onerror = function() {
-      btn.textContent = originalText;
-      btn.disabled = false;
-      alert('Failed to load Excel library. Try again.');
-    };
-    document.head.appendChild(script);
+  // ───────── settings (shared component) ─────────
+  async function openSettings() {
+    await AppliedInSettings.render($('settingsBox'), { snack, onChange: async s => { settings = s; render(); } });
+    $('setModal').hidden = false;
   }
 
-  // ── Helpers ──
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(text || ''));
-    return div.innerHTML;
+  // ───────── wiring ─────────
+  async function openBoard(view) {
+    const url = chrome.runtime.getURL('dashboard/dashboard.html'), hash = typeof view === 'string' ? '#' + view : '#overview';
+    const tabs = await chrome.tabs.query({ url: url + '*' });
+    if (tabs[0]) { await chrome.tabs.update(tabs[0].id, { active: true, url: url + hash }); chrome.windows.update(tabs[0].windowId, { focused: true }); } else chrome.tabs.create({ url: url + hash });
+    window.close();
   }
-
-  function formatDate(isoString) {
-    if (!isoString) return '';
-    const date = new Date(isoString);
-    const now = new Date();
-    const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-    const time = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
-    if (diff === 0) return `Today, ${time}`;
-    if (diff === 1) return `Yesterday, ${time}`;
-    if (diff < 7) return `${diff} days ago, ${time}`;
-    if (diff < 30) return `${Math.floor(diff / 7)} weeks ago`;
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  function wire() {
+    $('searchInput').addEventListener('input', e => { q = e.target.value; limit = 60; renderList(); });
+    $('btnAdd').onclick = openAdd; $('addClose').onclick = $('addCancel').onclick = () => $('addModal').hidden = true; $('addSave').onclick = () => saveAdd(false); $('addForce').onclick = () => saveAdd(true);
+    $('useTab').onclick = () => chrome.tabs.query({ active: true, currentWindow: true }, t => { if (t[0] && t[0].url && /^https?:/.test(t[0].url)) { $('addUrl').value = t[0].url; if (!$('addRole').value && t[0].title) $('addRole').value = t[0].title.split(/\s[|\-–—]\s/)[0].slice(0, 140); } });
+    $('btnCsv').onclick = () => openExport('csv'); $('btnExcel').onclick = () => openExport('excel');
+    $('exportClose').onclick = $('exportCancel').onclick = () => $('exportModal').hidden = true; $('exportGo').onclick = doExport;
+    $('btnBoard').onclick = $('mBoard').onclick = () => openBoard('overview'); $('btnSettings').onclick = openSettings; $('setClose').onclick = $('setDone').onclick = () => $('setModal').hidden = true;
+    $('btnMore').onclick = e => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
+    document.addEventListener('click', () => $('menu').hidden = true);
+    $('mBackup').onclick = backup; $('mRestore').onclick = () => $('fileRestore').click();
+    $('fileRestore').onchange = e => { if (e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; };
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') ['addModal', 'exportModal', 'setModal'].forEach(i => $(i).hidden = true); });
+    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.__rev) load(); });
   }
-
-  function formatDateFull(isoString) {
-    if (!isoString) return '';
-    return new Date(isoString).toLocaleString('en-IN');
-  }
-
-  function formatDateFile(date) {
-    return date.toISOString().split('T')[0];
-  }
-
-  // ── Initial Load ──
-  // loadApplications() already called above
-});
+  wire(); load();
+})();

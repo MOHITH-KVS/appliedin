@@ -1,48 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "AppliedIn",
-  "version": "1.5.1",
-  "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Built for Indian freshers.",
+  "name": "AppliedIn \u2014 Job Application Tracker",
+  "version": "1.1.2",
+  "description": "Auto-track your job applications from LinkedIn, Naukri, Internshala and more. Reminders, backup and insights. 100% private, free.",
+  "minimum_chrome_version": "111",
   "permissions": [
     "storage",
-    "activeTab",
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
     "scripting",
-    "tabs"
+    "activeTab"
   ],
   "host_permissions": [
-    "https://www.linkedin.com/*",
-    "https://www.naukri.com/*",
-    "https://internshala.com/*",
-    "https://*.indeed.com/*",
-    "https://*.glassdoor.com/*",
-    "https://*.glassdoor.co.in/*",
-    "https://unstop.com/*",
-    "<all_urls>",
-    "https://www.hirist.tech/*",
-    "https://www.hirist.com/*",
-    "https://cutshort.io/*",
-    "https://www.shine.com/*",
-    "https://www.foundit.in/*",
-    "https://www.freshersworld.com/*",
-    "https://docs.google.com/*",
-    "https://forms.google.com/*",
-    "https://forms.gle/*",
-    "https://*.typeform.com/*",
-    "https://*.jotform.com/*",
-    "https://*.zohorecruit.com/*",
-    "https://*.zoho.com/*",
-    "https://*.darwinbox.com/*",
-    "https://*.keka.com/*",
-    "https://*.bamboohr.com/*",
-    "https://forms.microsoft.com/*",
-    "https://*.workday.com/*",
-    "https://*.myworkdayjobs.com/*",
-    "https://*.greenhouse.io/*",
-    "https://*.lever.co/*",
-    "https://*.smartrecruiters.com/*",
-    "https://*.taleo.net/*",
-    "https://*.icims.com/*",
-    "https://*.airtable.com/*"
+    "https://appliedin.vercel.app/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "https://mail.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -53,6 +28,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
+    "default_title": "AppliedIn",
     "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -63,136 +39,64 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.linkedin.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/linkedin.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.naukri.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/naukri.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://internshala.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/internshala.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://*.indeed.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/indeed.js"
-      ],
-      "all_frames": true
-    },
-    {
-      "matches": [
-        "https://*.glassdoor.com/*",
-        "https://*.glassdoor.co.in/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/glassdoor.js"
-      ],
-      "all_frames": true
-    },
-    {
-      "matches": [
-        "https://unstop.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/unstop.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.hirist.tech/*",
-        "https://www.hirist.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/hirist.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://cutshort.io/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/cutshort.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.shine.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/shine.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.foundit.in/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/foundit.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.freshersworld.com/*"
-      ],
-      "js": [
-        "content/common.js",
-        "content/freshersworld.js"
-      ]
-    },
-    {
-      "matches": [
+        "https://*.apna.co/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.cutshort.io/*",
+        "https://*.darwinbox.com/*",
+        "https://*.darwinbox.in/*",
+        "https://*.foundit.in/*",
+        "https://*.freshersworld.com/*",
+        "https://*.freshteam.com/*",
+        "https://*.greenhouse.io/*",
+        "https://*.hirist.com/*",
+        "https://*.hirist.tech/*",
+        "https://*.icims.com/*",
+        "https://*.instahyre.com/*",
+        "https://*.internshala.com/*",
+        "https://*.jotform.com/*",
+        "https://*.keka.com/*",
+        "https://*.lever.co/*",
+        "https://*.linkedin.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.naukri.com/*",
+        "https://*.recruitee.com/*",
+        "https://*.shine.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.taleo.net/*",
+        "https://*.tally.so/*",
+        "https://*.timesjobs.com/*",
+        "https://*.typeform.com/*",
+        "https://*.unstop.com/*",
+        "https://*.wellfound.com/*",
+        "https://*.workable.com/*",
+        "https://*.workday.com/*",
+        "https://*.zohorecruit.com/*",
+        "https://*.zohorecruit.in/*",
         "https://docs.google.com/forms/*",
         "https://forms.gle/*",
         "https://forms.google.com/*"
       ],
       "js": [
-        "content/google-forms.js"
+        "lib/shared.js",
+        "content/adapters.js",
+        "content/core.js"
       ],
       "run_at": "document_idle"
     },
     {
       "matches": [
-        "<all_urls>"
+        "https://*.indeed.com/*",
+        "https://*.glassdoor.com/*",
+        "https://*.glassdoor.co.in/*"
       ],
       "js": [
-        "content/already-applied.js"
+        "lib/shared.js",
+        "content/adapters.js",
+        "content/core.js"
       ],
-      "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "xlsx.full.min.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "content_security_policy": {

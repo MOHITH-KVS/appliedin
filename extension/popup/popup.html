@@ -7,167 +7,105 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
+  <header class="top">
+    <div class="brand"><img src="../icons/icon48.png" alt="" width="26" height="26" /><span>AppliedIn</span></div>
+    <div class="top-r">
+      <span id="totalCount" class="pill">0 total</span>
+      <button id="btnBoard" class="ghost" type="button" title="Open full dashboard with board and insights">Dashboard</button>
+      <button id="btnSettings" class="icon" type="button" aria-label="Settings" title="Settings">⚙</button>
+    </div>
+  </header>
 
-  <!-- Header -->
-  <div class="header">
-    <div class="header-left">
-      <span class="logo">📋</span>
-      <span class="app-name">AppliedIn</span>
-    </div>
-    <div class="header-right">
-      <span class="total-count" id="totalCount">0 Total</span>
-    </div>
+  <section class="goal" aria-label="Daily goal">
+    <div class="goal-t"><span id="goalText"></span><span id="streakText"></span></div>
+    <div class="meter"><i id="goalFill"></i></div>
+  </section>
+
+  <button id="attention" class="strip warn" type="button" hidden></button>
+  <button id="backupWarn" class="strip" type="button" hidden></button>
+
+  <section class="stats">
+    <div class="stat"><b id="statToday">0</b><span>Today</span></div>
+    <div class="stat"><b id="statWeek">0</b><span>This week</span></div>
+    <div class="stat"><b id="statMonth">0</b><span>This month</span></div>
+    <div class="stat" id="statReplyBox" title="Companies that replied (shortlisted, interview, offer, rejected). Updated by you, by portal pages, or by Gmail detection."><b id="statResp">0</b><span id="statRespLbl">Replies</span></div>
+  </section>
+
+  <div class="search"><input id="searchInput" type="search" placeholder="Search company, role or portal" autocomplete="off" /></div>
+  <nav class="chips" id="chips" aria-label="Filter by status"></nav>
+
+  <main id="list" class="list"></main>
+  <div id="empty" class="empty" hidden>
+    <div class="empty-t">Nothing here yet</div>
+    <p id="emptyMsg">Apply on LinkedIn, Naukri or Internshala and your applications appear here automatically. You can also add one by hand.</p>
   </div>
 
-  <!-- Stats Bar -->
-  <div class="stats-bar">
-    <div class="stat">
-      <div class="stat-value" id="statToday">0</div>
-      <div class="stat-label">Today</div>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat">
-      <div class="stat-value" id="statYesterday">0</div>
-      <div class="stat-label">Yesterday</div>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat">
-      <div class="stat-value" id="statWeek">0</div>
-      <div class="stat-label">This Week</div>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat">
-      <div class="stat-value" id="statMonth">0</div>
-      <div class="stat-label">This Month</div>
-    </div>
+  <footer class="bottom">
+    <button id="btnAdd" class="primary" type="button">+ Add job</button>
+    <button id="btnCsv" type="button">CSV</button>
+    <button id="btnExcel" type="button">Excel</button>
+    <button id="btnMore" class="icon" type="button" aria-haspopup="menu" aria-label="More options">⋯</button>
+  </footer>
+
+  <div id="menu" class="menu" role="menu" hidden>
+    <button id="mBackup" role="menuitem" type="button">Back up all data (JSON)</button>
+    <button id="mRestore" role="menuitem" type="button">Restore from backup</button>
+    <button id="mBoard" role="menuitem" type="button">Open dashboard</button>
   </div>
+  <input type="file" id="fileRestore" accept="application/json,.json" hidden />
 
-  <!-- Search Bar -->
-  <div class="search-wrap">
-    <input
-      type="text"
-      id="searchInput"
-      placeholder="🔍 Search company or role..."
-      autocomplete="off"
-    />
-  </div>
-
-  <!-- Filter Tabs -->
-  <div class="filter-tabs">
-    <button class="tab active" data-filter="all">All</button>
-    <button class="tab" data-filter="Applied">Applied</button>
-    <button class="tab" data-filter="In Review">In Review</button>
-    <button class="tab" data-filter="Interview">Interview</button>
-    <button class="tab" data-filter="Shortlisted">Shortlisted</button>
-    <button class="tab" data-filter="Rejected">Rejected</button>
-  </div>
-
-  <!-- Applications List -->
-  <div class="applications-list" id="applicationsList"></div>
-
-  <!-- Empty State -->
-  <div class="empty-state" id="emptyState" style="display:none;">
-    <div class="empty-icon">📭</div>
-    <div class="empty-title">No applications yet</div>
-    <div class="empty-subtitle">Start applying on LinkedIn, Naukri, or Internshala and they'll appear here automatically.</div>
-  </div>
-
-  <!-- Bottom Actions -->
-  <div class="bottom-bar">
-    <button class="btn-add" id="btnAdd">+ Add Manually</button>
-    <button class="btn-export" id="btnExport">⬇ CSV</button>
-    <button class="btn-excel" id="btnExcel">📊 Excel</button>
-  </div>
-
-  <!-- Manual Add Modal -->
-  <div class="modal-overlay" id="modalOverlay" style="display:none;">
-    <div class="modal">
-      <div class="modal-header">
-        <span class="modal-title">Add Application</span>
-        <button class="modal-close" id="modalClose">✕</button>
-      </div>
-      <div class="modal-body">
-        <input type="text" id="addCompany" placeholder="Company name *" maxlength="100" />
-        <input type="text" id="addRole" placeholder="Job role *" maxlength="120" />
-        <input type="text" id="addLocation" placeholder="Location (optional)" maxlength="100" />
-        <div style="position:relative;display:flex;gap:6px;align-items:center;">
-          <input type="url" id="addUrl" placeholder="Job URL (optional) — paste link here" maxlength="500"
-            style="flex:1;font-size:11px;" />
-          <button type="button" id="pasteCurrentUrl" title="Paste current tab URL"
-            style="flex-shrink:0;padding:0 10px;height:32px;background:#eff6ff;border:1px solid #c7d7ff;
-            border-radius:6px;font-size:11px;font-weight:600;color:#1A56FF;cursor:pointer;white-space:nowrap;">
-            📋 Current Tab
-          </button>
+  <!-- Add job -->
+  <div class="overlay" id="addModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+      <div class="modal-h"><h2 id="addTitle">Add a job</h2><button class="icon" id="addClose" type="button" aria-label="Close">✕</button></div>
+      <div class="modal-b">
+        <label for="addCompany">Company</label><input id="addCompany" maxlength="100" />
+        <label for="addRole">Job role</label><input id="addRole" maxlength="140" />
+        <div class="two">
+          <div><label for="addLocation">Location</label><input id="addLocation" maxlength="100" /></div>
+          <div><label for="addSalary">Salary or stipend</label><input id="addSalary" maxlength="80" /></div>
         </div>
-        <select id="addPlatform">
-          <option value="">Select Platform</option>
-          <option value="LinkedIn">LinkedIn</option>
-          <option value="Naukri">Naukri</option>
-          <option value="Internshala">Internshala</option>
-          <option value="Indeed">Indeed</option>
-          <option value="Glassdoor">Glassdoor</option>
-          <option value="Unstop">Unstop</option>
-          <option value="Company Website">Company Website</option>
-          <option value="Other">Other</option>
-        </select>
-        <select id="addStatus">
-          <option value="Applied">Applied</option>
-          <option value="In Review">In Review</option>
-          <option value="Interview">Interview</option>
-          <option value="Shortlisted">Shortlisted</option>
-          <option value="Rejected">Rejected</option>
-        </select>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-cancel" id="btnCancel">Cancel</button>
-        <button class="btn-save" id="btnSave">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Export Period Modal -->
-  <div class="modal-overlay" id="exportModal" style="display:none;">
-    <div class="modal">
-      <div class="modal-header">
-        <span class="modal-title" id="exportModalTitle">Export Applications</span>
-        <button class="modal-close" id="exportModalClose">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="period-options">
-          <label class="period-option">
-            <input type="radio" name="exportPeriod" value="today" />
-            <span>Today</span>
-          </label>
-          <label class="period-option">
-            <input type="radio" name="exportPeriod" value="yesterday" />
-            <span>Yesterday</span>
-          </label>
-          <label class="period-option">
-            <input type="radio" name="exportPeriod" value="week" />
-            <span>This Week</span>
-          </label>
-          <label class="period-option">
-            <input type="radio" name="exportPeriod" value="month" />
-            <span>This Month</span>
-          </label>
-          <label class="period-option">
-            <input type="radio" name="exportPeriod" value="year" />
-            <span>This Year</span>
-          </label>
-          <label class="period-option">
-            <input type="radio" name="exportPeriod" value="all" checked />
-            <span>All Time</span>
-          </label>
+        <label for="addUrl">Job link</label>
+        <div class="inline"><input id="addUrl" type="url" maxlength="500" /><button id="useTab" type="button" class="small">Use this tab</button></div>
+        <div class="two">
+          <div><label for="addPlatform">Portal</label>
+            <select id="addPlatform"><option>LinkedIn</option><option>Naukri</option><option>Internshala</option><option>Indeed</option><option>Glassdoor</option><option>Unstop</option><option>Company Website</option><option selected>Other</option></select></div>
+          <div><label for="addStatus">Status</label>
+            <select id="addStatus"><option>Applied</option><option>Saved</option><option>In Review</option><option>Shortlisted</option><option>Interview</option><option>Offer</option><option>Rejected</option></select></div>
         </div>
-        <div class="period-count" id="periodCount">0 applications selected</div>
+        <p id="addErr" class="err" hidden></p>
       </div>
-      <div class="modal-footer">
-        <button class="btn-cancel" id="exportCancel">Cancel</button>
-        <button class="btn-save" id="exportDownload">Download</button>
-      </div>
+      <div class="modal-f"><button id="addCancel" type="button">Cancel</button><button id="addForce" type="button" hidden>Add anyway</button><button id="addSave" class="primary" type="button">Save job</button></div>
     </div>
   </div>
 
+  <!-- Export -->
+  <div class="overlay" id="exportModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+      <div class="modal-h"><h2 id="exportTitle">Export</h2><button class="icon" id="exportClose" type="button" aria-label="Close">✕</button></div>
+      <div class="modal-b">
+        <div class="periods" id="periods"></div>
+        <p class="muted" id="periodCount"></p>
+      </div>
+      <div class="modal-f"><button id="exportCancel" type="button">Cancel</button><button id="exportGo" class="primary" type="button">Download</button></div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="overlay" id="setModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+      <div class="modal-h"><h2 id="setTitle">Settings</h2><button class="icon" id="setClose" type="button" aria-label="Close">✕</button></div>
+      <div class="modal-b settings" id="settingsBox"></div>
+      <div class="modal-f"><button id="setDone" class="primary" type="button">Done</button></div>
+    </div>
+  </div>
+
+  <div id="snack" class="snack" role="status" hidden></div>
+
+  <script src="../lib/shared.js"></script>
+  <script src="../lib/store.js"></script>
+  <script src="../lib/ui.js"></script>
+  <script src="../lib/settingsui.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

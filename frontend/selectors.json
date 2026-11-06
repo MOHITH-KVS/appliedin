@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "Optional selector overrides for AppliedIn. Add a portal id (e.g. naukri) with arrays of CSS selectors or phrases when a portal changes its pages. Keep version increasing. No personal data is ever sent when this file is downloaded.",
+  "portals": {}
+}

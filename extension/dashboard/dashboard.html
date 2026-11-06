@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AppliedIn — Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="shell">
+    <aside class="side">
+      <div class="brand"><img src="../icons/icon48.png" alt="" width="30" height="30" /><span>AppliedIn</span></div>
+      <nav id="nav" aria-label="Main"></nav>
+    </aside>
+    <div class="content">
+      <header class="top">
+        <h1 id="viewTitle">Overview</h1>
+        <div class="top-actions">
+          <button id="btnAdd" class="primary" type="button">+ Add job</button>
+          <div class="menu-wrap">
+            <button id="btnMore" type="button" aria-haspopup="menu" aria-expanded="false">More ▾</button>
+            <div id="moreMenu" class="menu" role="menu" hidden>
+              <button role="menuitem" data-act="export" type="button">Export to CSV / Excel…</button>
+              <button role="menuitem" data-act="backup" type="button">Back up all data (JSON)</button>
+              <button role="menuitem" data-act="restore" type="button">Restore from backup…</button>
+              <button role="menuitem" data-act="cleanup" type="button">Clean up duplicates &amp; titles…</button>
+            </div>
+          </div>
+          <button id="btnExit" class="exit" type="button" title="Close the dashboard and go back to the AppliedIn popup"><span aria-hidden="true">↩</span> Exit</button>
+        </div>
+      </header>
+      <div id="banners"></div>
+      <main id="main" tabindex="-1"></main>
+    </div>
+  </div>
+  <div id="scrim" class="scrim" hidden></div>
+  <aside id="drawer" class="drawer" hidden aria-label="Application details"></aside>
+  <div id="snack" class="snack" role="status" aria-live="polite" hidden></div>
+  <input type="file" id="file" accept="application/json,.json" hidden />
+  <script src="../lib/shared.js"></script>
+  <script src="../lib/store.js"></script>
+  <script src="../lib/ui.js"></script>
+  <script src="../lib/settingsui.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
