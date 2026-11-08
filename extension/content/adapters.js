@@ -118,13 +118,24 @@
         return { role: t };
       }
     },
+    // Microsoft Forms — same idea as Google Forms: company can't be read reliably, so it always asks you to confirm.
+    {
+      id: 'msforms', platform: 'Microsoft Forms', hosts: ['forms.office.com', 'forms.microsoft.com', 'forms.cloud.microsoft'], alwaysConfirm: true,
+      success: ['your response was submitted', 'your response has been submitted'],
+      weak: ['thanks! your response', 'response was submitted', 'thank you for your response'],
+      titleSplit: function (t) {
+        const gf = list.filter(x => x.id === 'googleforms')[0];
+        return gf.titleSplit(String(t || '').replace(/\s*[-–|]\s*Microsoft Forms\s*$/i, ''));
+      }
+    },
     // Other form builders used by small companies for hiring — company can't be read reliably, so always confirm.
-    { id: 'forms', platform: 'Application Form', hosts: ['typeform.com', 'jotform.com', 'tally.so'], alwaysConfirm: true },
+    { id: 'forms', platform: 'Application Form', hosts: ['typeform.com', 'jotform.com', 'tally.so', 'zohopublic.com', 'zohopublic.in', 'zfrmz.com', 'zfrmz.in'], alwaysConfirm: true },
     // ATS / HR systems — company comes from the URL, role from JSON-LD or the page title.
     {
       id: 'ats', platform: 'Company Website', ats: true,
       hosts: ['greenhouse.io', 'lever.co', 'myworkdayjobs.com', 'workday.com', 'smartrecruiters.com', 'icims.com', 'taleo.net', 'ashbyhq.com',
-        'workable.com', 'recruitee.com', 'zohorecruit.com', 'zohorecruit.in', 'keka.com', 'darwinbox.in', 'darwinbox.com', 'bamboohr.com', 'freshteam.com']
+        'workable.com', 'recruitee.com', 'zohorecruit.com', 'zohorecruit.in', 'keka.com', 'darwinbox.in', 'darwinbox.com', 'bamboohr.com', 'freshteam.com',
+        'successfactors.com', 'successfactors.eu', 'oraclecloud.com', 'jobvite.com', 'teamtailor.com', 'breezy.hr', 'peoplestrong.com', 'springrecruit.com']
     }
   ];
 

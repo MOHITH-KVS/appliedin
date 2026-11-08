@@ -364,6 +364,7 @@
     const isApply = eq(label, adapter.applyText || ADP.DEFAULT_APPLY);
     const isSubmit = starts(label, adapter.submitText || ADP.DEFAULT_SUBMIT);
     if (!isApply && !isSubmit) return;
+    if (adapter.contextRequired && !jobContextOk()) return;      // unknown site that doesn't look like a job page: stay silent
     const ex = extract({ withJd: true });
     arm(isSubmit ? 2 : 1, ex);
     const external = isApply && ((b.tagName === 'A' && (b.target === '_blank' || (b.host && b.host !== location.host))) || eq(label, adapter.externalText || []));
