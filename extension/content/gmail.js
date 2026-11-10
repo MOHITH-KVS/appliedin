@@ -47,6 +47,7 @@
       chrome.runtime.sendMessage({ type: 'EMAIL_SIGNAL', items: items.slice(0, 80) }, r => {
         void chrome.runtime.lastError;
         if (r && r.changed) note('AppliedIn updated ' + r.changed + ' application' + (r.changed > 1 ? 's' : '') + ' from your inbox');
+        else if (r && r.pending) note('AppliedIn found ' + r.pending + ' repl' + (r.pending > 1 ? 'ies' : 'y') + ' for a company with several roles — open the AppliedIn dashboard to pick the role');
       });
     } catch (e) {}
   }

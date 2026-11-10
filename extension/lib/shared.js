@@ -111,14 +111,16 @@
     const t = String(text || '').toLowerCase().replace(/\s+/g, ' ');
     if (/unfortunately|regret to inform|not (be )?moving forward|will not be proceeding|not been selected|not selected|other candidates|decided not to (move|proceed|continue)|unable to (offer|proceed|move forward)|position has been filled|we won'?t be (moving|proceeding)|not shortlisted/.test(t)) return { status: 'Rejected', reason: 'rejection wording' };
     if (/offer letter|job offer|offer of employment|pleased to offer|delighted to offer|happy to offer|we are excited to offer|letter of intent/.test(t)) return { status: 'Offer', reason: 'offer wording' };
-    if (/interview (schedule|scheduled|invitation|invite|round|slot|link|confirmation|details)|invite you (for|to) (an |a )?(interview|discussion)|schedule (an|your|a) (interview|call|discussion)|technical (round|interview)|hr (round|interview)|video interview|face[- ]to[- ]face interview|virtual interview/.test(t)) return { status: 'Interview', reason: 'interview wording' };
+    const notInterview = /(interview (tips|questions|preparation|prep|guide|series|experience)|mock interview|how to (crack|ace|prepare))/.test(t);
+    if (!notInterview && /interview (schedule|scheduled|invitation|invite|round|slot|link|confirmation|details|for|with|at|on|call|process|request|panel|date|time)|invite you (for|to) (an |a )?(interview|discussion)|schedule (an|your|a) (interview|call|discussion)|technical (round|interview)|hr (round|interview)|video interview|face[- ]to[- ]face interview|virtual interview/.test(t)) return { status: 'Interview', reason: 'interview wording' };
     if (/shortlisted|short-listed|selected for (the )?(next|further) (round|stage|process)|online (assessment|test)|coding (test|assessment|challenge)|aptitude test|assessment link|hackerrank|codility|mettl|hirepro|cocubes|amcat|test link/.test(t)) return { status: 'Shortlisted', reason: 'shortlist / assessment wording' };
     if (/(application|profile|resume|cv) (was |has been |is )?(viewed|seen|reviewed|downloaded|under review)|viewed your (application|profile|resume)|recruiter (viewed|action)|employer viewed/.test(t)) return { status: 'In Review', reason: 'application viewed' };
     return { status: '', reason: '' };
   }
   const GENERIC_CO = ['data', 'cloud', 'tech', 'global', 'services', 'solutions', 'systems', 'digital', 'india', 'group', 'software', 'technologies', 'consulting', 'labs', 'career', 'careers', 'jobs', 'hiring', 'team', 'talent', 'recruitment', 'hr'];
   function domainLabel(email) { const m = String(email || '').toLowerCase().match(/@([^>\s]+)/); if (!m) return ''; const p = m[1].split('.'); return p.length > 2 && p[p.length - 2].length <= 3 ? p[p.length - 3] : p[Math.max(0, p.length - 2)]; }
-  function matchEmailToApp(apps, it) {
+  function matchEmailToApp(apps, it, status) { const r = matchEmail(apps, it, status || ''); return r && r.app || null; }
+  function _oldMatchEmailToApp(apps, it) {
     const hay = ' ' + words([it.fromName, domainLabel(it.fromEmail), it.subject, it.snippet].join(' ')) + ' ';
     const cands = apps.filter(a => {
       if (a.status === 'Saved') return false;
@@ -145,5 +147,49 @@
     return { total: real.length, replied: replied.length, eligible: eligible.length, rate: eligible.length ? Math.round(replied.length / eligible.length * 100) : 0 };
   }
 
-  g.AppliedInShared = { cleanRole, hostLabelIsNoise, classifyEmail, matchEmailToApp, replyStats, domainLabel, words, STATUSES, RANK, RESPONDED, normCompany, normRole, sameCompany, sameRole, urlKey, canonicalUrl, statusFromText, slugToName };
+
+
+  // Several roles at the SAME company? Don't guess — narrow down, and if still unclear return the candidates so the user can pick.
+  function matchEmail(apps, it, status) {
+    const hay = ' ' + words([it.fromName, domainLabel(it.fromEmail), it.subject, it.snippet].join(' ')) + ' ';
+    let cands = apps.filter(a => {
+      if (a.status === 'Saved') return false;
+      const c = normCompany(a.company);
+      return c.length >= 3 && GENERIC_CO.indexOf(c) < 0 && hay.indexOf(' ' + c + ' ') >= 0;
+    });
+    if (!cands.length) return null;
+    if (status) {                                     // keep only applications this reply could actually change
+      cands = cands.filter(a => status === 'Rejected' ? (a.status !== 'Offer' && a.status !== 'Rejected')
+        : RANK[status] > (RANK[a.status] === undefined ? 1 : RANK[a.status]));
+      if (!cands.length) return null;
+    }
+    if (cands.length === 1) return { app: cands[0] };
+    const score = a => normRole(a.role).split(' ').filter(x => x.length > 2 && hay.indexOf(' ' + x + ' ') >= 0).length;
+    const ranked = cands.map(a => ({ a, s: score(a) })).sort((x, y) => y.s - x.s);
+    if (ranked[0].s > 0 && ranked[0].s > ranked[1].s) return { app: ranked[0].a };
+    return { candidates: cands.slice().sort((x, y) => Date.parse(y.date) - Date.parse(x.date)).slice(0, 6) };
+  }
+  // Gmail search that only looks at mail AFTER you applied; add the role words to narrow it down further.
+  const ymd = d => { d = new Date(d); return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate(); };
+  function mailQuery(a, withRole) {
+    const co = '"' + String(a.company || '').replace(/"/g, '') + '"', after = a.date ? ' after:' + ymd(Date.parse(a.date) - 864e5) : '';
+    const toks = normRole(cleanRole(a.role)).split(' ').filter(t => t.length > 2).slice(0, 3);
+    return co + (withRole && toks.length ? ' (' + toks.map(t => '"' + t + '"').join(' OR ') + ')' : '') + after;
+  }
+  const mailSearchUrl = (a, withRole) => 'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent(mailQuery(a, withRole));
+  const mailSubjectUrl = subject => 'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent('subject:"' + String(subject || '').replace(/"/g, '').slice(0, 80) + '"');
+  // One-click polite follow-up email (opens Gmail compose; nothing is sent automatically).
+  function followUpDraft(a, name) {
+    const d = new Date(a.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const subject = 'Following up on my application – ' + a.role;
+    const body = 'Dear ' + a.company + ' Hiring Team,\n\nI hope you are doing well. I applied for the ' + a.role + ' position on ' + d + ' and wanted to follow up on the status of my application.\n\nI remain very interested in the opportunity and would be glad to share any additional information you may need.\n\nThank you for your time and consideration.\n\nBest regards,\n' + (name || '[Your name]');
+    return { subject, body, url: 'https://mail.google.com/mail/?view=cm&fs=1&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body) };
+  }
+  function calendarUrl(a) {
+    const t = Date.parse(a.interviewDate); if (!t) return '';
+    const f = x => new Date(x).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('Interview – ' + a.company + ' (' + a.role + ')') + '&dates=' + f(t) + '/' + f(t + 36e5) + '&details=' + encodeURIComponent('Added from AppliedIn');
+  }
+
+  g.AppliedInShared = { matchEmail, mailQuery, mailSearchUrl, mailSubjectUrl, followUpDraft, calendarUrl, cleanRole, hostLabelIsNoise, classifyEmail, matchEmailToApp, replyStats, domainLabel, words, STATUSES, RANK, RESPONDED, normCompany, normRole, sameCompany, sameRole, urlKey, canonicalUrl, statusFromText, slugToName };
 })(typeof self !== 'undefined' ? self : this);

@@ -4,8 +4,8 @@
   const $ = id => document.getElementById(id);
   const DAY = 864e5;
   const VIEWS = [['overview', 'Overview', '⌂'], ['followups', 'Follow-ups', '⏰'], ['applications', 'Applications', '☰'], ['board', 'Board', '▥'], ['insights', 'Insights', '◔'], ['settings', 'Settings', '⚙']];
-  const DEF_F = { q: '', status: 'all', portal: 'all', range: 'all', sort: 'date-desc', day: '' };
-  const st = { apps: [], set: Store.DEFAULTS, activity: [], view: 'overview', f: Object.assign({}, DEF_F), page: 1, size: 25, sel: new Set(), qsel: new Set(), qlimit: 40, ins: '30', openId: null, bl: {}, bq: '', bstage: 'Applied', bchosen: false, bportal: 'all', bsort: 'date-desc', bselect: false };
+  const DEF_F = { q: '', status: 'all', portal: 'all', range: 'all', sort: 'date-desc', day: '', starred: false };
+  const st = { apps: [], set: Store.DEFAULTS, activity: [], pending: [], view: 'overview', f: Object.assign({}, DEF_F), page: 1, size: 25, sel: new Set(), qsel: new Set(), qlimit: 40, ins: '30', openId: null, bl: {}, bq: '', bstage: 'Applied', bchosen: false, bportal: 'all', bsort: 'date-desc', bselect: false };
   let snackT = null, lastFocus = null;
 
   // ───────── helpers ─────────
@@ -13,7 +13,8 @@
   const isoDay = x => { const d = new Date(x), p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
   const waiting = a => a.status === 'Applied' || a.status === 'In Review';
   const waitDays = a => Math.floor((Date.now() - Math.max(Date.parse(a.lastStatusChange || a.date), a.lastFollowUp || 0)) / DAY);
-  const mailSearch = c => 'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent('"' + c + '"');
+  const mailSearch = (a, withRole) => S.mailSearchUrl(a, withRole);
+  const draftMail = a => chrome.tabs.create({ url: S.followUpDraft(a, st.set.userName).url });
   const real = () => st.apps.filter(a => a.status !== 'Saved');
   const hasReplied = a => S.RESPONDED.indexOf(a.status) >= 0 || (a.history || []).some(x => S.RESPONDED.indexOf(x.status) >= 0 && !x.auto);
   const reached = (a, list) => list.indexOf(a.status) >= 0 || (a.history || []).some(x => list.indexOf(x.status) >= 0);
@@ -33,6 +34,18 @@
     } }, S.STATUSES.map(s => h('option', { value: s, text: s })));
     sel.value = a.status; return sel;
   }
+  const starTitle = a => a.starred ? 'Remove star' : 'Star — a dream company (earlier follow-ups, never auto-closed)';
+  const starBtn = (a, cls) => h('button', { class: (cls || 'iconbtn') + ' star' + (a.starred ? ' on' : ''), type: 'button', 'aria-pressed': String(!!a.starred), title: starTitle(a), 'aria-label': (a.starred ? 'Remove star from ' : 'Star ') + a.company,
+    text: a.starred ? '★' : '☆', onclick: async e => { e.stopPropagation(); await Store.update(a.id, { starred: !a.starred }); await load(); } });
+  const resumeDatalist = () => h('datalist', { id: 'resumeList' }, Array.from(new Set(st.apps.map(a => a.resume).filter(Boolean))).slice(0, 20).map(r => h('option', { value: r })));
+  function setResumeDialog(ids) {
+    const i = inp(st.set.defaultResume || '', { list: 'resumeList', maxlength: 80, placeholder: 'e.g. Resume v2 – Data Analyst' });
+    dialog('Set resume for ' + plural(ids.length, 'application'), [h('p', { class: 'muted', text: 'Records which resume you sent, so Insights can show which one gets replies.' }), fld('Resume', i), resumeDatalist()],
+      [{ label: 'Cancel' }, { label: 'Apply', primary: true, onClick: async () => { await Store.bulkUpdate(ids, { resume: i.value.trim() }); st.sel.clear(); await load(); snack('Resume set for ' + plural(ids.length, 'application')); } }]);
+  }
+  const bulkExtras = ids => [
+    h('button', { type: 'button', text: '★ Star', onclick: async () => { await Store.bulkUpdate(ids, { starred: true }); st.sel.clear(); await load(); snack(plural(ids.length, 'application') + ' starred'); } }),
+    h('button', { type: 'button', text: 'Set resume…', onclick: () => setResumeDialog(ids) })];
   function dialog(title, body, buttons) {
     const dlg = h('dialog', { 'aria-label': title });
     const close = () => dlg.close();
@@ -51,8 +64,8 @@
   // ───────── load / route / chrome ─────────
   async function load() {
     const y = window.scrollY;
-    const r = await Promise.all([Store.getAll(), Store.settings(), Store.activity()]);
-    st.apps = r[0]; st.set = r[1]; st.activity = r[2];
+    const r = await Promise.all([Store.getAll(), Store.settings(), Store.activity(), Store.pending()]);
+    st.apps = r[0]; st.set = r[1]; st.activity = r[2]; st.pending = r[3];
     const ids = new Set(st.apps.map(a => a.id)); st.sel.forEach(i => { if (!ids.has(i)) st.sel.delete(i); }); st.qsel.forEach(i => { if (!ids.has(i)) st.qsel.delete(i); });
     render(); window.scrollTo(0, y);
   }
@@ -101,6 +114,21 @@
     return out;
   }
 
+  // ───────── YOUR WEEK (also sent as a notification every Sunday) ─────────
+  function weeklyPanel() {
+    const w = Store.weeklyStats(st.apps, st.set);
+    const box = (label, v, prev, cmp) => {
+      const d = v - prev;
+      return h('div', { class: 'wk' }, h('b', { text: v }), h('span', { text: label }), cmp ? h('small', { class: d > 0 ? 'up' : d < 0 ? 'down' : '', text: (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '＝ ') + Math.abs(d) + ' vs last week' }) : null);
+    };
+    const pct = Math.min(100, Math.round(w.applied / w.goal * 100));
+    return h('div', { class: 'panel', style: 'margin-bottom:16px' }, h('h2', { text: 'Your week' }),
+      h('p', { class: 'sub', text: 'The last 7 days compared with the 7 days before. You also get this as a notification every Sunday.' }),
+      h('div', { class: 'wk-grid' }, box('Applications', w.applied, w.appliedPrev, true), box('Replies', w.replies, w.repliesPrev, true), box('Interviews', w.interviews, w.interviewsPrev, true), box('Offers', w.offers, 0, false),
+        h('div', { class: 'wk' }, h('b', { text: pct + '%' }), h('span', { text: 'of weekly goal (' + w.goal + ')' }), h('div', { class: 'meter' + (pct >= 100 ? ' done' : '') }, h('i', { style: 'width:' + pct + '%' })))),
+      w.starredWaiting ? h('p', { style: 'margin:12px 0 0;font-weight:600;color:var(--warn)', text: '★ ' + plural(w.starredWaiting, 'dream job') + ' waiting for a follow-up — ' }, h('button', { class: 'link', type: 'button', text: 'open follow-ups', onclick: () => go('followups') })) : null);
+  }
+
   // ───────── OVERVIEW ─────────
   function overview(m, att) {
     const r = real(), today = r.filter(a => Date.parse(a.date) >= startToday()).length, goal = st.set.dailyGoal || 10;
@@ -110,6 +138,7 @@
       m.appendChild(h('div', { class: 'panel empty' }, h('b', { text: 'Welcome to AppliedIn 👋' }), 'Apply to a job on LinkedIn, Naukri or Internshala and it appears here automatically. Or add one yourself.', h('div', { style: 'margin-top:14px' }, h('button', { class: 'primary', type: 'button', text: '+ Add your first job', onclick: addJob })))); return;
     }
     m.appendChild(h('p', { class: 'muted', style: 'margin:0 0 14px', text: hi + '. ' + (today >= goal ? 'Daily goal reached 🎉 ' : 'You have applied to ' + today + ' of ' + goal + ' today. ') + (att.due.length ? plural(att.due.length, 'application') + ' waiting for a reply.' : 'Nothing is overdue.') + (stk > 1 ? ' 🔥 ' + stk + '-day streak.' : '') }));
+    if (st.pending.length) m.appendChild(pendingPanel());
     const kpi = (attrs, big, label, small, extra) => h('a', Object.assign({ class: 'kpi' + (attrs.warn ? ' warn' : '') }, attrs.a), h('b', { text: big }), h('span', { text: label }), small ? h('small', { text: small }) : null, extra);
     m.appendChild(h('div', { class: 'kpis' },
       kpi({ a: { href: '#applications?range=today' } }, today, 'Applied today', 'Goal: ' + goal, h('div', { class: 'meter' + (today >= goal ? ' done' : '') }, h('i', { style: 'width:' + Math.min(100, Math.round(today / goal * 100)) + '%' }))),
@@ -118,6 +147,7 @@
       kpi({ a: { href: '#followups' }, warn: att.due.length > 0 }, att.due.length, 'Waiting for a reply', att.soon.length ? plural(att.soon.length, 'interview') + ' soon' : 'Follow up after ' + st.set.followUpDays + ' days'),
       kpi({ a: { href: '#applications?status=Interview' } }, r.filter(a => a.status === 'Interview').length, 'In interview stage', r.filter(a => a.status === 'Offer').length + ' offers')));
 
+    m.appendChild(weeklyPanel());
     const trend = h('div', { class: 'panel' }, h('h2', { text: 'Applications, last 30 days' }), h('p', { class: 'sub', text: 'Click a bar to see that day’s applications.' }),
       bars(lastDays(30, r), i => { if (i.v) go('applications', { day: i.key }); }));
     const need = h('div', { class: 'panel' }, h('h2', { text: 'Needs your attention' }), h('p', { class: 'sub', text: 'Oldest first. Open Follow-ups to act on all of them.' }));
@@ -144,11 +174,29 @@
     m.appendChild(h('div', { class: 'grid2' }, act, list));
   }
 
+  // ───────── REPLIES TO CONFIRM (a company with several roles: you choose, we don't guess) ─────────
+  function pendingPanel() {
+    const p = h('div', { class: 'panel pend-panel', style: 'margin-bottom:16px' }, h('h2', { text: '✉ Replies to confirm (' + st.pending.length + ')' }),
+      h('p', { class: 'sub', text: 'These companies have more than one role from you, so AppliedIn needs you to say which job each email is about.' }));
+    st.pending.slice(0, 8).forEach(x => {
+      const cands = x.candidates.map(id => st.apps.find(a => a.id === id)).filter(Boolean);
+      const pick = async (appId, label) => { await Store.resolvePending(x.id, appId); await load(); snack(appId ? label + ' → ' + x.status : 'Dismissed'); };
+      p.appendChild(h('div', { class: 'pend' },
+        h('div', { class: 'pend-t' }, h('b', { text: x.from || 'A company' }), h('span', { class: 'pill s-' + U.slug(x.status), text: 'Looks like: ' + x.status }), h('div', { class: 'muted', style: 'font-size:13px', text: '“' + x.subject + '”' })),
+        h('div', { class: 'pend-a' }, h('span', { class: 'muted', style: 'font-size:13px', text: 'Which job is this about?' }),
+          cands.map(a => h('button', { class: 'btn', type: 'button', text: a.role + ' · ' + U.fmtDate(a.date), onclick: () => pick(a.id, a.company + ' — ' + a.role) })),
+          h('a', { class: 'btn', style: 'text-decoration:none', href: S.mailSubjectUrl(x.subject), target: '_blank', rel: 'noopener noreferrer', text: 'Find the email' }),
+          h('button', { class: 'link', type: 'button', text: 'None of these', onclick: () => pick(0) }))));
+    });
+    return p;
+  }
+
   // ───────── FOLLOW-UPS ─────────
   async function bulkTouch(ids, patch, msg) {
     await Promise.all(ids.map(id => Store.update(id, patch))); st.qsel.clear(); await load(); snack(msg);
   }
   function followups(m, att) {
+    if (st.pending.length) m.appendChild(pendingPanel());
     if (att.soon.length) {
       const p = h('div', { class: 'panel', style: 'margin-bottom:16px' }, h('h2', { text: 'Interviews in the next 48 hours' }));
       att.soon.forEach(a => p.appendChild(h('div', { class: 'act-row' }, h('div', { class: 'grow' }, h('b', { text: a.company }), h('small', { text: a.role })), h('button', { class: 'btn', type: 'button', text: 'Open', onclick: () => openDrawer(a.id) }))));
@@ -174,11 +222,12 @@
       const reply = h('select', { 'aria-label': 'Record a reply from ' + a.company, onchange: async e => { if (!e.target.value) return; await Store.update(a.id, { status: e.target.value }); await load(); snack(a.company + ' → ' + e.target.value); } },
         h('option', { value: '', text: 'Got a reply…' }), ['Shortlisted', 'Interview', 'Offer', 'Rejected', 'No Response'].map(s => h('option', { value: s, text: s })));
       p.appendChild(h('div', { class: 'q' }, cb,
-        h('div', null, h('div', { class: 'co', text: a.company }), h('div', { class: 'ro', text: a.role }), h('div', { class: 'muted', style: 'font-size:12px', text: (a.custom ? 'Your follow-up date has arrived · ' : 'Waiting ' + a.waiting + ' days · ') + (rec.platform || 'Other') })),
-        h('div', { class: 'acts' },
+        h('div', null, h('div', { class: 'co', text: (a.starred ? '★ ' : '') + a.company }), h('div', { class: 'ro', text: a.role }), h('div', { class: 'muted', style: 'font-size:12px', text: (a.custom ? 'Your follow-up date has arrived · ' : 'Waiting ' + a.waiting + ' days · ') + (rec.platform || 'Other') })),
+        h('div', { class: 'acts' }, starBtn(rec),
           h('button', { type: 'button', text: 'Followed up', onclick: async () => { await Store.update(a.id, { lastFollowUp: Date.now() }); await load(); snack('Marked as followed up', 'Undo', async () => { await Store.update(a.id, { lastFollowUp: 0 }); await load(); }); } }),
+          h('button', { type: 'button', text: 'Draft follow-up', title: 'Opens a ready-to-send email in Gmail', onclick: () => draftMail(rec) }),
           h('button', { type: 'button', text: 'Snooze 3d', onclick: async () => { await Store.update(a.id, { snoozeUntil: Date.now() + 3 * DAY }); await load(); } }),
-          reply, h('a', { class: 'btn', style: 'text-decoration:none;padding:6px 10px;font-size:13px;border-radius:8px', href: mailSearch(a.company), target: '_blank', rel: 'noopener noreferrer', text: 'Search email' }),
+          reply, h('a', { class: 'btn', style: 'text-decoration:none;padding:6px 10px;font-size:13px;border-radius:8px', href: mailSearch(rec), title: 'Search Gmail for this company, only mail after you applied', target: '_blank', rel: 'noopener noreferrer', text: 'Search email' }),
           h('button', { type: 'button', text: 'Details', onclick: () => openDrawer(a.id) }))));
     });
     if (att.due.length > st.qlimit) p.appendChild(h('button', { class: 'more', type: 'button', text: 'Show more (' + (att.due.length - st.qlimit) + ' left)', onclick: () => { st.qlimit += 40; render(); } }));
@@ -193,11 +242,12 @@
       if (f.portal !== 'all' && (a.platform || 'Other') !== f.portal) return false;
       if (f.range !== 'all' && Date.parse(a.date) < (f.range === 'today' ? startToday() : Date.now() - (+f.range) * DAY)) return false;
       if (f.day && isoDay(a.date) !== f.day) return false;
+      if (f.starred && !a.starred) return false;
       return !t || (a.company + ' ' + a.role + ' ' + (a.platform || '') + ' ' + (a.location || '') + ' ' + (a.notes || '')).toLowerCase().indexOf(t) >= 0;
     });
     const by = {
       'date-desc': (a, b) => Date.parse(b.date) - Date.parse(a.date), 'date-asc': (a, b) => Date.parse(a.date) - Date.parse(b.date),
-      'company': (a, b) => a.company.localeCompare(b.company), 'status': (a, b) => S.STATUSES.indexOf(a.status) - S.STATUSES.indexOf(b.status),
+      'company': (a, b) => a.company.localeCompare(b.company), 'starred': (a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0) || Date.parse(b.date) - Date.parse(a.date), 'status': (a, b) => S.STATUSES.indexOf(a.status) - S.STATUSES.indexOf(b.status),
       'waiting': (a, b) => (waiting(b) ? waitDays(b) : -1) - (waiting(a) ? waitDays(a) : -1)
     };
     return list.sort(by[f.sort] || by['date-desc']);
@@ -218,10 +268,10 @@
     cb.checked = st.sel.has(a.id);
     const li = h('li', { class: 'row' + (cb.checked ? ' sel' : '') }, cb,
       h('div', { class: 'main' }, h('button', { type: 'button', 'aria-label': 'Open details: ' + a.company + ', ' + a.role, onclick: () => openDrawer(a.id) },
-        h('div', { class: 'co', text: a.company }), h('div', { class: 'ro', text: a.role }),
-        h('div', { class: 'meta' }, [a.platform || 'Other', U.fmtDate(a.date)].join(' · '), due ? h('span', { class: 'due', text: ' · waiting ' + w + 'd' }) : null))),
+        h('div', { class: 'co', text: (a.starred ? '★ ' : '') + a.company }), h('div', { class: 'ro', text: a.role }),
+        h('div', { class: 'meta' }, [a.platform || 'Other', U.fmtDate(a.date), a.resume ? '📄 ' + a.resume : ''].filter(Boolean).join(' · '), due ? h('span', { class: 'due', text: ' · waiting ' + w + 'd' }) : null))),
       h('div', { class: 'portal', text: a.platform || 'Other' }), h('div', { class: 'when', text: U.fmtDate(a.date) }), h('div', { class: 'wait' + (due ? ' due' : ''), text: w !== null ? w + 'd' : '–' }),
-      statusSel(a), h('div', { class: 'ract' },
+      statusSel(a), h('div', { class: 'ract' }, starBtn(a),
         h('button', { class: 'iconbtn', type: 'button', title: 'Edit', 'aria-label': 'Edit ' + a.company, text: '✎', onclick: () => openDrawer(a.id) }),
         h('button', { class: 'iconbtn del', type: 'button', title: 'Delete', 'aria-label': 'Delete ' + a.company, text: '🗑', onclick: () => deleteIds([a.id]) })));
     return li;
@@ -237,13 +287,15 @@
     m.appendChild(h('div', { class: 'toolbar' }, search,
       sel('Portal', 'portal', [['all', 'All portals']].concat(portals.map(p => [p, p]))),
       sel('Date range', 'range', [['all', 'Any date'], ['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']]),
-      sel('Sort by', 'sort', [['date-desc', 'Newest first'], ['date-asc', 'Oldest first'], ['waiting', 'Waiting longest'], ['company', 'Company A–Z'], ['status', 'Status']])));
+      sel('Sort by', 'sort', [['date-desc', 'Newest first'], ['date-asc', 'Oldest first'], ['waiting', 'Waiting longest'], ['starred', '★ Starred first'], ['company', 'Company A–Z'], ['status', 'Status']])));
     const base = filtered(true), chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' });
     [['all', 'All']].concat(S.STATUSES.map(s => [s, s])).forEach(c => {
       const n = c[0] === 'all' ? base.length : base.filter(a => a.status === c[0]).length;
       if (c[0] !== 'all' && !n && f.status !== c[0]) return;
       chips.appendChild(h('button', { class: 'chip', type: 'button', 'aria-pressed': String(f.status === c[0]), text: c[1] + ' ' + n, onclick: () => upd('status', c[0]) }));
     });
+    const nStar = base.filter(a => a.starred).length;
+    if (nStar || f.starred) chips.appendChild(h('button', { class: 'chip', type: 'button', 'aria-pressed': String(!!f.starred), text: '★ Starred ' + nStar, onclick: () => upd('starred', !f.starred) }));
     if (f.day) chips.appendChild(h('button', { class: 'chip day', type: 'button', text: 'Day: ' + new Date(f.day + 'T00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' ✕', onclick: () => upd('day', '') }));
     m.appendChild(chips);
     if (!list.length) { m.appendChild(h('div', { class: 'panel empty' }, h('b', { text: st.apps.length ? 'No applications match these filters' : 'No applications yet' }), st.apps.length ? h('button', { class: 'link', type: 'button', text: 'Clear all filters', onclick: () => { st.f = Object.assign({}, DEF_F); st.page = 1; render(); } }) : 'They appear automatically when you apply.')); return; }
@@ -253,7 +305,7 @@
       const mv = h('select', { 'aria-label': 'Move selected to status', onchange: e => { if (e.target.value) bulkStatus(ids(), e.target.value); } }, h('option', { value: '', text: 'Move to…' }), S.STATUSES.map(s => h('option', { value: s, text: s })));
       bulkHost.appendChild(h('div', { class: 'bulk', role: 'region', 'aria-label': 'Bulk actions' }, h('b', { text: n + ' selected' }),
         n < list.length ? h('button', { type: 'button', text: 'Select all ' + list.length, onclick: () => { list.forEach(a => st.sel.add(a.id)); render(); } }) : null, mv,
-        h('button', { type: 'button', text: 'Mark No Response', onclick: () => bulkStatus(ids(), 'No Response') }),
+        h('button', { type: 'button', text: 'Mark No Response', onclick: () => bulkStatus(ids(), 'No Response') }), bulkExtras(ids()),
         h('button', { type: 'button', text: 'Delete', onclick: () => deleteIds(ids()) }), h('button', { class: 'x', type: 'button', text: 'Clear', onclick: () => { st.sel.clear(); render(); } }))); };
     const all = h('input', { type: 'checkbox', 'aria-label': 'Select all on this page', onchange: e => { pageItems.forEach(a => e.target.checked ? st.sel.add(a.id) : st.sel.delete(a.id)); render(); } });
     all.checked = pageItems.length > 0 && pageItems.every(a => st.sel.has(a.id));
@@ -291,7 +343,7 @@
     const w = waiting(a) ? waitDays(a) : null, overdue = w !== null && w >= st.set.followUpDays;
     const cb = st.bselect ? h('input', { type: 'checkbox', class: 'bc-cb', 'aria-label': 'Select ' + a.company, onclick: e => e.stopPropagation(), onchange: e => { e.target.checked ? st.sel.add(a.id) : st.sel.delete(a.id); card.classList.toggle('sel', e.target.checked); renderBulk(); } }) : null;
     if (cb) cb.checked = st.sel.has(a.id);
-    const chips = [a.platform, a.workMode, a.location].filter(Boolean).slice(0, 3);
+    const chips = [a.platform, a.resume ? '📄 ' + a.resume : '', a.workMode, a.location].filter(Boolean).slice(0, 3);
     const when = a.status === 'Interview' && a.interviewDate ? '🎯 ' + new Date(a.interviewDate).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
       : w !== null ? (overdue ? 'Follow up · ' : 'Waiting ') + w + 'd' : 'Applied ' + U.fmtDate(a.date);
     const card = h('article', { class: 'bc' + (st.sel.has(a.id) ? ' sel' : ''), draggable: 'true', tabindex: '0', 'aria-label': a.company + ', ' + a.role + ', ' + a.status,
@@ -299,10 +351,10 @@
       ondragend: () => { card.classList.remove('drag'); document.body.classList.remove('dragging'); },
       onclick: () => { if (st.bselect) { cb.click(); } else openDrawer(a.id); },
       onkeydown: e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); st.bselect ? cb.click() : openDrawer(a.id); } } },
-      h('div', { class: 'bc-top' }, cb, avatar(a.company), h('div', { class: 'bc-t' }, h('div', { class: 'bc-co', text: a.company }), h('div', { class: 'bc-ro', text: a.role }))),
+      h('div', { class: 'bc-top' }, cb, avatar(a.company), h('div', { class: 'bc-t' }, h('div', { class: 'bc-co', text: (a.starred ? '★ ' : '') + a.company }), h('div', { class: 'bc-ro', text: a.role }))),
       chips.length ? h('div', { class: 'bc-chips' }, chips.map(t => h('span', { class: 'chip-s', text: t }))) : null,
       h('div', { class: 'bc-foot' }, h('span', { class: 'age' + (overdue ? ' warn' : '') }, w !== null ? h('i', { class: 'pulse' }) : null, when),
-        h('div', { class: 'bc-acts', onclick: e => e.stopPropagation() }, moveMenu(a),
+        h('div', { class: 'bc-acts', onclick: e => e.stopPropagation() }, starBtn(a), moveMenu(a),
           a.url ? h('a', { class: 'iconbtn', href: a.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open job posting', 'aria-label': 'Open job posting for ' + a.company, text: '↗' }) : null,
           h('button', { class: 'iconbtn del', type: 'button', title: 'Delete', 'aria-label': 'Delete ' + a.company, text: '🗑', onclick: () => deleteIds([a.id]) }))));
     return card;
@@ -321,7 +373,7 @@
     if (!bulkHostEl) return; bulkHostEl.textContent = ''; const n = st.sel.size; if (!n) return;
     const ids = () => Array.from(st.sel);
     const mv = h('select', { 'aria-label': 'Move selected to stage', onchange: e => { if (e.target.value) bulkStatus(ids(), e.target.value); } }, h('option', { value: '', text: 'Move to…' }), S.STATUSES.map(s => h('option', { value: s, text: s })));
-    bulkHostEl.appendChild(h('div', { class: 'bulk', role: 'region', 'aria-label': 'Bulk actions' }, h('b', { text: n + ' selected' }), mv,
+    bulkHostEl.appendChild(h('div', { class: 'bulk', role: 'region', 'aria-label': 'Bulk actions' }, h('b', { text: n + ' selected' }), mv, bulkExtras(ids()),
       h('button', { type: 'button', text: 'Delete', onclick: () => deleteIds(ids()) }), h('button', { class: 'x', type: 'button', text: 'Clear', onclick: () => { st.sel.clear(); render(); } })));
   }
   function board(m) {
@@ -349,7 +401,7 @@
       'date-desc': (a, b) => Date.parse(b.date) - Date.parse(a.date), 'date-asc': (a, b) => Date.parse(a.date) - Date.parse(b.date),
       'company': (a, b) => a.company.localeCompare(b.company), 'waiting': (a, b) => (waiting(b) ? waitDays(b) : -1) - (waiting(a) ? waitDays(a) : -1)
     };
-    const items = base.filter(a => a.status === s).sort(by[st.bsort]);
+    const items = base.filter(a => a.status === s).sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0) || by[st.bsort](a, b));     // ★ dream jobs float to the top
     const panel = h('section', { class: 'sp', 'aria-label': s + ' applications' },
       h('div', { class: 'sp-h' }, h('div', null, h('h2', null, h('span', { class: 'pill s-' + U.slug(s), text: s }), plural(items.length, 'application')), h('p', { class: 'sub', text: STAGE_NOTE[s] }))));
     const grid = list => h('div', { class: 'bgrid' }, list.map(bcard));
@@ -401,6 +453,14 @@
     m.appendChild(h('div', { class: 'grid2' },
       h('div', { class: 'panel' }, h('h2', { text: 'Which days you apply' }), bars(wd.map((v, i) => ({ v, l: names[i], title: names[i] + ': ' + plural(v, 'application') + ', ' + wr[i] + ' replied' })))),
       h('div', { class: 'panel' }, h('h2', { text: 'Where replies come from' }), h('div', { style: 'overflow-x:auto' }, tbl))));
+    // which resume gets replies?
+    const byRes = {}; apps.forEach(a => { if (a.resume) (byRes[a.resume] = byRes[a.resume] || []).push(a); });
+    const rk = Object.keys(byRes).sort((x, y) => byRes[y].length - byRes[x].length).slice(0, 8);
+    m.appendChild(rk.length
+      ? h('div', { class: 'panel', style: 'margin-top:16px' }, h('h2', { text: 'Which resume gets replies?' }), h('p', { class: 'sub', text: 'Compare the resumes you have sent. Small numbers can mislead — look for a pattern over 20+ applications.' }),
+          h('div', { style: 'overflow-x:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, h('th', { text: 'Resume' }), h('th', { class: 'n', text: 'Sent' }), h('th', { class: 'n', text: 'Replies' }), h('th', { class: 'n', text: 'Reply rate' }), h('th', { class: 'n', text: 'Interviews' }))),
+            h('tbody', null, rk.map(k => { const g = byRes[k], r = g.filter(hasReplied).length; return h('tr', null, h('td', { text: k }), h('td', { class: 'n', text: g.length }), h('td', { class: 'n', text: r }), h('td', { class: 'n', text: pct(r, g.length) }), h('td', { class: 'n', text: g.filter(a => reached(a, ['Interview', 'Offer'])).length })); })))))
+      : h('div', { class: 'panel', style: 'margin-top:16px' }, h('h2', { text: 'Which resume gets replies?' }), h('p', { class: 'sub', text: 'Tell AppliedIn which resume you are using (Settings → “Resume you are using now”) and every new application is tagged with it. Then this table shows which version gets replies.' }), h('button', { class: 'btn', type: 'button', text: 'Open settings', onclick: () => go('settings') })));
   }
 
   // ───────── SETTINGS ─────────
@@ -428,25 +488,30 @@
     const d = $('drawer'); d.textContent = '';
     const f = { company: inp(a.company, { maxlength: 100 }), role: inp(a.role, { maxlength: 140 }), location: inp(a.location, { maxlength: 100 }), salary: inp(a.salary, { maxlength: 80 }), url: inp(a.url, { type: 'url' }),
       interview: inp(toLocal(a.interviewDate), { type: 'datetime-local' }), follow: inp(toLocal(a.followUpDate, true), { type: 'date' }), notes: h('textarea', { placeholder: 'Recruiter name, salary talk, what to prepare…' }),
-      status: h('select', null, S.STATUSES.map(s => h('option', { value: s, text: s }))) };
+      status: h('select', null, S.STATUSES.map(s => h('option', { value: s, text: s }))),
+      resume: inp(a.resume || '', { list: 'resumeList', maxlength: 80, placeholder: 'e.g. Resume v2 – Data Analyst' }) };
     f.notes.value = a.notes || ''; f.status.value = a.status;
     const err = h('p', { class: 'err', role: 'alert' });
     const w = waiting(a) ? waitDays(a) : null;
     d.append(
-      h('header', null, h('div', null, h('h2', { text: a.company }), h('p', { text: a.role }), h('p', { text: [a.platform, U.fmtDate(a.date), w !== null ? 'waiting ' + w + ' days' : ''].filter(Boolean).join(' · ') })), h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Close details', text: '✕', onclick: closeDrawer })),
+      h('header', null, h('div', null, h('h2', { text: (a.starred ? '★ ' : '') + a.company }), h('p', { text: a.role }), h('p', { text: [a.platform, U.fmtDate(a.date), w !== null ? 'waiting ' + w + ' days' : ''].filter(Boolean).join(' · ') })), h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Close details', text: '✕', onclick: closeDrawer })),
       h('div', { class: 'body' }, fld('Status', f.status), h('div', { class: 'two' }, fld('Company', f.company), fld('Role', f.role)), h('div', { class: 'two' }, fld('Location', f.location), fld('Salary / stipend', f.salary)), fld('Job link', f.url),
-        h('div', { class: 'two' }, fld('Interview date', f.interview), fld('Follow up on', f.follow)), fld('Notes', f.notes),
+        h('div', { class: 'two' }, fld('Interview date', f.interview), fld('Follow up on', f.follow)), fld('Resume used', f.resume), resumeDatalist(), fld('Notes', f.notes),
         a.jd ? h('details', { class: 'jd' }, h('summary', { text: 'Saved job description' }), h('pre', { text: a.jd })) : null,
         h('h3', { class: 'set-h', text: 'History' }),
         h('ul', { class: 'tl' }, (a.history || []).slice().reverse().map(x => h('li', null, h('b', { text: x.status }), ' · ' + U.fmtFull(x.at) + (x.auto ? ' (automatic)' : '')))), err),
       h('footer', null,
         h('button', { class: 'primary', type: 'button', text: 'Save changes', onclick: async () => {
           if (!f.company.value.trim() || !f.role.value.trim()) { err.textContent = 'Company and role are required.'; return; }
-          await Store.update(a.id, { company: f.company.value.trim(), role: f.role.value.trim(), location: f.location.value.trim(), salary: f.salary.value.trim(), url: f.url.value.trim(), status: f.status.value, interviewDate: fromLocal(f.interview.value), followUpDate: fromLocal(f.follow.value), notes: f.notes.value });
+          await Store.update(a.id, { company: f.company.value.trim(), role: f.role.value.trim(), location: f.location.value.trim(), salary: f.salary.value.trim(), url: f.url.value.trim(), status: f.status.value, resume: f.resume.value.trim(), interviewDate: fromLocal(f.interview.value), followUpDate: fromLocal(f.follow.value), notes: f.notes.value });
           closeDrawer(); await load(); snack('Saved'); } }),
         a.url ? h('a', { class: 'btn', style: 'text-decoration:none;padding:9px 14px;border-radius:10px', href: a.url, target: '_blank', rel: 'noopener noreferrer', text: 'Open job' }) : null,
-        h('a', { class: 'btn', style: 'text-decoration:none;padding:9px 14px;border-radius:10px', href: mailSearch(a.company), target: '_blank', rel: 'noopener noreferrer', text: 'Search email' }),
+        h('a', { class: 'btn', style: 'text-decoration:none;padding:9px 14px;border-radius:10px', href: mailSearch(a), title: 'Company, only mail after you applied', target: '_blank', rel: 'noopener noreferrer', text: 'Search email' }),
+        h('a', { class: 'btn', style: 'text-decoration:none;padding:9px 14px;border-radius:10px', href: mailSearch(a, true), title: 'Company and role words', target: '_blank', rel: 'noopener noreferrer', text: 'Email about this role' }),
+        waiting(a) ? h('button', { class: 'btn', type: 'button', text: 'Draft follow-up', onclick: () => draftMail(a) }) : null,
+        a.interviewDate ? h('a', { class: 'btn', style: 'text-decoration:none;padding:9px 14px;border-radius:10px', href: S.calendarUrl(a), target: '_blank', rel: 'noopener noreferrer', text: '📅 Add to calendar' }) : null,
         waiting(a) ? h('button', { class: 'btn', type: 'button', text: 'Followed up', onclick: async () => { await Store.update(a.id, { lastFollowUp: Date.now() }); closeDrawer(); await load(); snack('Marked as followed up'); } }) : null,
+        h('button', { class: 'btn', type: 'button', text: a.starred ? '★ Starred' : '☆ Star', title: starTitle(a), onclick: async e => { await Store.update(a.id, { starred: !a.starred }); a.starred = !a.starred; e.target.textContent = a.starred ? '★ Starred' : '☆ Star'; await load(); } }),
         h('button', { class: 'btn', type: 'button', style: 'color:var(--bad)', text: 'Delete', onclick: () => deleteIds([a.id]) })));
     d.hidden = false; $('scrim').hidden = false; f.company.focus();
   }
@@ -454,15 +519,16 @@
   // ───────── add / export / backup / cleanup ─────────
   function addJob() {
     const f = { company: inp('', { maxlength: 100 }), role: inp('', { maxlength: 140 }), location: inp('', { maxlength: 100 }), salary: inp('', { maxlength: 80 }), url: inp('', { type: 'url', placeholder: 'https://…' }),
+      resume: inp(st.set.defaultResume || '', { list: 'resumeList', maxlength: 80, placeholder: 'e.g. Resume v2 – Data Analyst' }),
       platform: h('select', null, ['LinkedIn', 'Naukri', 'Internshala', 'Indeed', 'Glassdoor', 'Unstop', 'Company Website', 'Other'].map(p => h('option', { value: p, text: p }))),
       status: h('select', null, ['Applied', 'Saved', 'In Review', 'Shortlisted', 'Interview', 'Offer', 'Rejected'].map(p => h('option', { value: p, text: p }))) };
     f.platform.value = 'Other'; const err = h('p', { class: 'err', role: 'alert' }); let force = false;
-    dialog('Add a job', [h('div', { class: 'two' }, fld('Company', f.company), fld('Job role', f.role)), h('div', { class: 'two' }, fld('Location', f.location), fld('Salary / stipend', f.salary)), fld('Job link', f.url), h('div', { class: 'two' }, fld('Portal', f.platform), fld('Status', f.status)), err],
+    dialog('Add a job', [h('div', { class: 'two' }, fld('Company', f.company), fld('Job role', f.role)), h('div', { class: 'two' }, fld('Location', f.location), fld('Salary / stipend', f.salary)), fld('Job link', f.url), fld('Resume used', f.resume), resumeDatalist(), h('div', { class: 'two' }, fld('Portal', f.platform), fld('Status', f.status)), err],
       [{ label: 'Cancel' }, { label: 'Save job', primary: true, onClick: async dlg => {
         const c = f.company.value.trim(), r = f.role.value.trim(), u = f.url.value.trim();
         if (!c || !r) { err.textContent = 'Enter the company and the job role.'; return true; }
         if (u && !/^https?:\/\//i.test(u)) { err.textContent = 'The job link must start with http:// or https://'; return true; }
-        const res = await Store.add({ company: c, role: r, location: f.location.value.trim(), salary: f.salary.value.trim(), url: u, platform: f.platform.value, status: f.status.value, source: 'manual' }, { force });
+        const res = await Store.add({ company: c, role: r, location: f.location.value.trim(), salary: f.salary.value.trim(), url: u, resume: f.resume.value.trim(), platform: f.platform.value, status: f.status.value, source: 'manual' }, { force });
         if (res.error) { err.textContent = res.error; return true; }
         if (res.duplicate) { err.textContent = 'You already have ' + res.existing.company + ' — ' + res.existing.role + ' (' + res.existing.status + ', ' + U.fmtDate(res.existing.date) + '), matched by ' + res.reason + '. If this is a different job, press “Add anyway”.'; force = true; dlg.querySelector('footer .primary').textContent = 'Add anyway'; return true; }
         await load(); snack(res.promoted ? 'Moved to Applied' : 'Added ' + c); } }]);
@@ -540,7 +606,7 @@
       if (e.key === 'n') { e.preventDefault(); addJob(); }
     });
     // refresh when the background changes data (but never while you are editing in the drawer)
-    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.__rev || ch.activity) && !st.openId && !document.querySelector('dialog[open]')) load(); });
+    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.__rev || ch.activity || ch.emailPending) && !st.openId && !document.querySelector('dialog[open]')) load(); });
   }
   wire(); route(); load();
 })();

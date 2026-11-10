@@ -217,7 +217,7 @@
     .row{display:flex;gap:8px;margin-top:4px}
     .btn{flex:1;padding:11px 14px;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;background:#e2e8f0;color:#0f172a}
     .btn.p{background:#1a56ff;color:#fff}.btn.p:hover{background:#1445d6}.btn:focus-visible{outline:3px solid rgba(26,86,255,.4);outline-offset:2px}
-    .toast{position:fixed;right:20px;bottom:20px;display:flex;align-items:center;gap:12px;background:#0f172a;color:#fff;padding:12px 14px 12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 30px rgba(15,23,42,.35);z-index:2147483647;max-width:min(420px,92vw)}
+    .toast{position:fixed;right:20px;bottom:20px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;background:#0f172a;color:#fff;padding:12px 14px 12px 16px;border-radius:10px;font-size:14px;box-shadow:0 8px 30px rgba(15,23,42,.35);z-index:2147483647;max-width:min(420px,92vw)}
     .toast.ok{border-left:4px solid #22c55e}.toast.warn{border-left:4px solid #f59e0b}.toast.info{border-left:4px solid #60a5fa}
     .toast button{background:none;border:0;color:#93c5fd;font-weight:700;font-size:13px;cursor:pointer;padding:4px 6px;border-radius:6px}.toast button:hover{background:rgba(255,255,255,.1)}
     .bar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#fff;color:#0f172a;border:1.5px solid #1a56ff;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;box-shadow:0 10px 36px rgba(15,23,42,.3);z-index:2147483646;max-width:min(560px,94vw);font-size:14px}
@@ -327,6 +327,7 @@
   function runAction(a) {
     if (a.do === 'undo') send({ type: 'DELETE_APP', id: a.id }).then(() => UI.toast({ msg: 'Removed from AppliedIn', kind: 'info' }));
     else if (a.do === 'edit') UI.confirm({ data: a.data, id: a.id, mode: 'edit' });
+    else if (a.do === 'star') send({ type: 'UPDATE_APP', id: a.id, changes: { starred: true } }).then(() => UI.toast({ msg: '★ Starred — follow-ups will come sooner', kind: 'ok' }));
     else if (a.do === 'view') send({ type: 'OPEN_DASH', hash: a.hash || '#applications' });
     else if (a.do === 'again') send({ type: 'SAVE_APP', force: true, data: a.data }).then(r => afterSave(r, a.data.company, a.data, a.data.status));
   }
@@ -335,7 +336,7 @@
     if (res && res.saved) {
       UI.toast({
         msg: (res.promoted ? 'Moved to Applied — ' : status === 'Saved' ? 'Saved for later — ' : res.upgraded ? 'Updated — ' : 'Saved — ') + company + (res.total ? '  (#' + res.total + ')' : ''), kind: 'ok',
-        actions: [{ label: 'View', do: 'view', hash: q }, { label: 'Edit', do: 'edit', id: res.id, data: { company, role: data.role } }, { label: 'Undo', do: 'undo', id: res.id }]
+        actions: [{ label: 'View', do: 'view', hash: q }, { label: 'Edit', do: 'edit', id: res.id, data: { company, role: data.role } }, { label: '★ Star', do: 'star', id: res.id }, { label: 'Undo', do: 'undo', id: res.id }]
       });
     } else if (res && res.duplicate) {
       const e = res.existing || {};
@@ -347,7 +348,7 @@
         : (res && res.error) ? 'Could not save: ' + res.error : 'Could not save. Open the AppliedIn popup and add it manually.';
       UI.toast({ msg: '⚠ NOT saved. ' + why, kind: 'warn' });
     }
-    loadIndex();
+    loadIndex(true);
   }
 
   // ───────────────────────── apply / submit clicks ─────────────────────────
@@ -400,14 +401,17 @@
   function startWatching() {
     watchUntil = Date.now() + (tabState.inherited ? 10 : 5) * 60000;
     if (!watchTimer) watchTimer = setInterval(tick, 1000);
-    if (!watchMo && document.body) { watchMo = new MutationObserver(debounce(tick, 350)); watchMo.observe(document.body, { childList: true, subtree: true, characterData: true }); }
+    if (!watchMo && document.body) { const later = debounce(tick, 350); watchMo = new MutationObserver(() => { dirty = true; later(); }); watchMo.observe(document.body, { childList: true, subtree: true, characterData: true }); }
   }
   function stopWatching() {
     clearInterval(watchTimer); watchTimer = null;
     if (watchMo) { watchMo.disconnect(); watchMo = null; }
   }
+  let dirty = true, idle = 0;
   function tick() {
     if (handled) return;
+    if (!dirty && ++idle % 5) return;       // page unchanged: skip the expensive text read (still re-check every 5s)
+    dirty = false;
     if (Date.now() > watchUntil) { stopWatching(); return; }
     if (adapter.contextRequired && !(JOBURL.test(location.pathname + location.search) || tabState.draft)) return;
     if (isSuccess()) finalize();
@@ -444,7 +448,10 @@
   }
 
   // ───────────────────────── already-applied banner, list badges, track button ─────────────────────────
-  async function loadIndex() {
+  let idxAt = 0;
+  async function loadIndex(force) {
+    if (!force && index.length && Date.now() - idxAt < 30000) return;     // don't ask the background worker on every tab switch
+    idxAt = Date.now();
     const r = await send({ type: 'GET_INDEX' });
     index = Array.isArray(r) ? r : [];
     byKey = new Map(); index.forEach(a => { if (a.urlKey) byKey.set(a.urlKey, a); });
@@ -485,7 +492,7 @@
       if (st && st !== rec.status) { updates.push({ id: rec.id, status: st }); done.add(rec.id); }
     });
     if (updates.length) send({ type: 'SYNC_STATUS', updates }).then(r => {
-      if (r && r.changed) { UI.toast({ msg: 'AppliedIn updated ' + r.changed + ' status' + (r.changed > 1 ? 'es' : '') + ' from ' + adapter.platform, kind: 'ok' }); loadIndex(); }
+      if (r && r.changed) { UI.toast({ msg: 'AppliedIn updated ' + r.changed + ' status' + (r.changed > 1 ? 'es' : '') + ' from ' + adapter.platform, kind: 'ok' }); loadIndex(true); }
     });
   }
 
@@ -518,7 +525,7 @@
     remote = settings.remoteConfig !== false ? cfg.remoteConfig || null : null;
     const st = await send({ type: 'TAB_STATE' });
     if (st) tabState = Object.assign(tabState, st);
-    await loadIndex();
+    await loadIndex(true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('visibilitychange', onVisibility);
     if (IS_TOP) chrome.runtime.onMessage.addListener(m => { if (m && m.type === 'UI_SHOW' && UI[m.name]) UI[m.name](m.payload); });

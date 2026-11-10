@@ -6,9 +6,9 @@
   const DEFAULTS = {
     enabled: true, showTrackButton: true, badges: true, notifications: true,
     followUpDays: 7, ghostDays: 30, autoGhost: true, dailyGoal: 10, careerSites: false, remoteConfig: true,
-    gmailSync: false, lastBackupAt: 0, lastDigestDay: '', badgeMode: 'off'
+    gmailSync: false, lastBackupAt: 0, lastDigestDay: '', badgeMode: 'off', userName: '', defaultResume: '', weeklySummary: true, lastWeeklyKey: '', starFollowUpDays: 3
   };
-  let dbp = null, mig = null;
+  let dbp = null, mig = null, idxCache = null;
 
   function open() {
     if (dbp) return dbp;
@@ -35,7 +35,7 @@
     try { const out = await fn(t.objectStore(STORE)); await done; return out; }
     catch (e) { try { t.abort(); } catch (_) {} throw e; }
   }
-  function bump() { try { chrome.storage.local.set({ __rev: Date.now() }); } catch (e) {} }
+  function bump() { idxCache = null; try { chrome.storage.local.set({ __rev: Date.now() }); } catch (e) {} }
 
   function build(d) {
     const now = new Date().toISOString();
@@ -53,11 +53,12 @@
       jd: String(d.jd || '').slice(0, 8000), source: d.source || 'manual',
       history: Array.isArray(d.history) && d.history.length ? d.history : [{ status, at: date }],
       lastReminded: d.lastReminded || 0, followUpNotified: !!d.followUpNotified, interviewNotified: !!d.interviewNotified,
+      resume: String(d.resume || '').trim().slice(0, 80), starred: !!d.starred,
       followUpDismissed: !!d.followUpDismissed, conf: d.conf || '', lastFollowUp: d.lastFollowUp || 0, snoozeUntil: d.snoozeUntil || 0, tabId: d.tabId || 0
     };
   }
   function slim(a) {
-    return { id: a.id, company: a.company, role: a.role, status: a.status, date: a.date, platform: a.platform, url: a.url, urlKey: a.urlKey };
+    return { id: a.id, company: a.company, role: a.role, status: a.status, date: a.date, platform: a.platform, url: a.url, urlKey: a.urlKey, starred: !!a.starred, resume: a.resume || '' };
   }
   function locationsDiffer(a, b) {
     a = S.words(a); b = S.words(b);
@@ -104,7 +105,22 @@
     ready, DEFAULTS, importLegacy,
     async getAll() { await ready(); const all = await run('readonly', st => P(st.getAll())); return all.sort((a, b) => Date.parse(b.date) - Date.parse(a.date)); },
     async get(id) { await ready(); return run('readonly', st => P(st.get(id))); },
-    async index() { return (await api.getAll()).map(slim); },
+    // The slim list used by job pages is cached in memory (rebuilt only after a write) so opening a job page never re-reads every record.
+    async index() { if (idxCache) return idxCache; const r = (await api.getAll()).map(slim); idxCache = r; return r; },
+    invalidate() { idxCache = null; },
+    // Replies the program could not safely assign (several roles at one company) wait here until the user picks.
+    async pending() { const r = await chrome.storage.local.get('emailPending'); return Array.isArray(r.emailPending) ? r.emailPending : []; },
+    async addPending(list) {
+      const cur = await api.pending(), ids = new Set(cur.map(x => x.id)), fresh = list.filter(x => !ids.has(x.id));
+      if (fresh.length) await chrome.storage.local.set({ emailPending: fresh.concat(cur).slice(0, 50) });
+      return fresh.length;
+    },
+    async resolvePending(id, appId) {
+      const cur = await api.pending(), it = cur.find(x => x.id === id);
+      await chrome.storage.local.set({ emailPending: cur.filter(x => x.id !== id) });
+      if (it && appId) return api.syncStatuses([{ id: appId, status: it.status, subject: it.subject }], 'email');
+      return { changed: 0, names: [] };
+    },
     async add(d, opts) {
       await ready();
       const rec = build(d), force = !!(opts && opts.force);
@@ -192,12 +208,13 @@
         if (a.status === 'Applied' || a.status === 'In Review') {
           const base = Math.max(Date.parse(a.lastStatusChange || a.date), a.lastFollowUp || 0);
           const age = (now - base) / day;
-          if (age >= s.followUpDays && age < s.ghostDays && !a.followUpDismissed && (a.snoozeUntil || 0) < now) due.push(Object.assign(slim(a), { waiting: Math.floor(age) }));
+          const lim = a.starred ? (s.starFollowUpDays || 3) : s.followUpDays;          // ★ jobs: earlier follow-up, and they never expire
+          if (age >= lim && (a.starred || age < s.ghostDays) && !a.followUpDismissed && (a.snoozeUntil || 0) < now) due.push(Object.assign(slim(a), { waiting: Math.floor(age) }));
         }
         if (a.interviewDate) { const t = Date.parse(a.interviewDate); if (t && t - now < 48 * 36e5 && t - now > -2 * 36e5) soon.push(slim(a)); }
         if (a.followUpDate && Date.parse(a.followUpDate) <= now && (a.lastFollowUp || 0) < Date.parse(a.followUpDate) && ['Applied', 'In Review', 'Shortlisted'].indexOf(a.status) >= 0) due.push(Object.assign(slim(a), { waiting: 0, custom: true }));
       }
-      due.sort((x, y) => y.waiting - x.waiting);
+      due.sort((x, y) => (y.starred ? 1 : 0) - (x.starred ? 1 : 0) || y.waiting - x.waiting);
       return { due, soon };
     },
     // Find the same job saved more than once (same link, or same role + same/similar company, or same role within minutes).
@@ -272,7 +289,7 @@
         const all = await P(st.getAll());
         for (const a of all) {
           let ch = false;
-          if ((a.status === 'Applied' || a.status === 'In Review') && s.autoGhost) {
+          if ((a.status === 'Applied' || a.status === 'In Review') && s.autoGhost && !a.starred) {      // ★ dream-company jobs are never auto-closed
             const base = Math.max(Date.parse(a.lastStatusChange || a.date), a.lastFollowUp || 0);
             if ((now - base) / day >= s.ghostDays) {
               a.status = 'No Response'; a.lastStatusChange = new Date().toISOString();
@@ -290,6 +307,17 @@
       });
       if (out.ghosted) await api.logActivity({ id: 0, company: out.ghosted + ' applications', role: '', from: 'Applied', to: 'No Response', source: 'auto', note: 'no update for ' + s.ghostDays + '+ days', bulk: ghostMap });
       bump(); return out;
+    },
+    // Numbers for the Sunday summary and the dashboard "Your week" card (pure — no writes).
+    weeklyStats(all, s, now) {
+      now = now || Date.now(); const D = 864e5, w0 = now - 7 * D, w1 = now - 14 * D;
+      const real = all.filter(a => a.status !== 'Saved'), inWin = (t, a, b) => t >= a && t < b;
+      const applied = (a, b) => real.filter(x => inWin(Date.parse(x.date), a, b)).length;
+      const ev = (list, a, b) => real.filter(x => (x.history || []).some(h => list.indexOf(h.status) >= 0 && !h.auto && inWin(Date.parse(h.at), a, b))).length;
+      const att = api.attention(all, s, now);
+      return { applied: applied(w0, now + 1), appliedPrev: applied(w1, w0), replies: ev(S.RESPONDED, w0, now + 1), repliesPrev: ev(S.RESPONDED, w1, w0),
+        interviews: ev(['Interview'], w0, now + 1), interviewsPrev: ev(['Interview'], w1, w0), offers: ev(['Offer'], w0, now + 1),
+        goal: (s.dailyGoal || 10) * 7, waiting: att.due.length, starredWaiting: att.due.filter(x => x.starred).length };
     },
     // Quick health check used by Settings → Diagnostics (writes, reads back and removes a temporary record).
     async selfTest() {

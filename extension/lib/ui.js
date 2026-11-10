@@ -45,10 +45,10 @@
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;           // block spreadsheet formula injection
     return '"' + s.replace(/"/g, '""') + '"';          // proper quote escaping
   }
-  const COLS = ['Company', 'Role', 'Location', 'Platform', 'Salary', 'Job Type', 'Work Mode', 'Status', 'Date Applied', 'Follow-up', 'Interview', 'Notes', 'URL'];
+  const COLS = ['Company', 'Role', 'Location', 'Platform', 'Salary', 'Job Type', 'Work Mode', 'Status', 'Date Applied', 'Follow-up', 'Interview', 'Notes', 'URL', 'Resume', 'Starred'];
   function rowOf(a) {
     return [a.company, a.role, a.location, a.platform, a.salary, a.jobType, a.workMode, a.status, fmtFull(a.date),
-      a.followUpDate ? new Date(a.followUpDate).toLocaleDateString('en-IN') : '', a.interviewDate ? fmtFull(a.interviewDate) : '', a.notes, a.url];
+      a.followUpDate ? new Date(a.followUpDate).toLocaleDateString('en-IN') : '', a.interviewDate ? fmtFull(a.interviewDate) : '', a.notes, a.url, a.resume || '', a.starred ? 'Yes' : ''];
   }
   function toCSV(list) {
     return '\uFEFF' + [COLS.map(csvCell).join(',')].concat(list.map(a => rowOf(a).map(csvCell).join(','))).join('\r\n');

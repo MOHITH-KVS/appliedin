@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.5 — "Resume, star, weekly summary"
+- **Resume used per application.** Set "Resume you are using now" once in Settings: every new application is tagged with it automatically. Edit it per application, set it for many at once ("Set resume…" in the bulk bar), and see **Which resume gets replies?** in Insights. Included in CSV/Excel export.
+- **★ Dream-company star.** Star any application (popup, list, board, details, or the ★ Star button in the "Saved" toast). Starred jobs: follow-up after 3 days (changeable), stay in the follow-up queue until you act, are never auto-moved to No Response, float to the top of lists/board columns, are named first in the daily reminder, and have their own ★ filter.
+- **Sunday weekly summary.** A notification on Sunday after 9 am (applications vs last week, replies, interviews, offers, ★ jobs waiting). The same numbers are on the dashboard Overview in a new "Your week" card. Switch it off or preview it in Settings.
+
+## 1.1.4 — "Smarter mail, lighter engine"
+**Mail automation**
+- **Several roles at one company:** when a reply could belong to more than one of your applications, AppliedIn no longer guesses. It narrows down by the role named in the email and by which jobs the reply could actually change; if it is still unclear, the email goes to **Replies to confirm** (Overview, Follow-ups, and a strip in the popup) where you tap the right role.
+- **Search email** now searches the company *and only mail from after you applied*; a second button searches company + role words.
+- **Draft follow-up**: opens a ready-to-send Gmail compose window (company, role, date filled in; signed with the name you set in Settings). Nothing is sent automatically.
+- **Add to calendar** for interview dates (Google Calendar link).
+- Subjects like "Interview for QA Engineer" / "Interview with …" are now recognised; newsletters such as "interview tips" are ignored.
+
+**Optimisation**
+- The list used on job pages is cached in the background worker and rebuilt only after a change (before, every job page and tab switch re-read every saved record including job descriptions).
+- Job pages re-ask for that list at most every 30 seconds.
+- While waiting for the "application sent" message, the page text is only re-read when the page actually changed.
+- Gmail batches use the cached list instead of the whole database.
+
 ## 1.1.2 — "Calmer & clearer"
 - **Board redesigned:** a pipeline strip (eight stage tiles with counts, grouped *In progress* / *Closed*) and one focused stage below it. Nothing scrolls sideways, nothing is hidden in empty columns. Applied is split into *Time to follow up* and *Recently applied*. Cards have an avatar, chips, waiting time, a **Move ⇄** menu (works with touch and keyboard), open ↗ and delete 🗑; drag a card onto a stage tile also works. "Select cards" mode for bulk move/delete. Search, portal filter and sorting.
 - **Exit button** in the dashboard header: closes the dashboard and brings the quick popup back (Chrome 127+; older versions just close the tab). It never closes your whole window.

@@ -1,36 +1,26 @@
-AppliedIn v1.1.0  —  what is in this zip
-=========================================
-extension/   the Chrome extension (load this folder in chrome://extensions → Load unpacked)
-frontend/    your website (upload/replace on GitHub → Vercel deploys it automatically)
-             frontend/appliedin-extension.zip is the download file users get from your site
+AppliedIn v1.1.5 — what is in this zip
+=======================================
+extension/   the Chrome extension (replace the files in your existing extension folder, press reload on chrome://extensions,
+             then refresh your open job tabs)
+frontend/    your website (unchanged; keeps the "Version 1.1 launching soon" banner). frontend/appliedin-extension.zip is rebuilt.
 
-TO RELEASE (free):
-1. Test the extension first (see TEST CHECKLIST below).
-2. Replace everything in your website repo with the contents of frontend/ and push. Done —
-   the Download button on your site now serves frontend/appliedin-extension.zip.
-3. Search Console: submit https://appliedin.vercel.app/sitemap.xml
+WHAT'S NEW
+ 1. RESUME PER APPLICATION
+    - Settings -> "Resume you are using now": type e.g. "Resume v2 - Data Analyst". Every NEW application is tagged with it automatically.
+    - Change it any time you switch resumes. Edit one application (popup or dashboard details) or tag many: Dashboard -> Applications ->
+      tick rows -> "Set resume...".
+    - Dashboard -> Insights -> "Which resume gets replies?" compares sent / replies / reply rate / interviews per resume.
+    - Resume is also in the CSV/Excel export.
+ 2. DREAM-COMPANY STAR
+    - Click the star on any application (popup, dashboard list, board card, details) or "★ Star" in the "Saved" toast after applying.
+    - Starred jobs: follow-up reminder after 3 days (Settings -> "Follow up starred jobs after"), stay in Follow-ups until you act,
+      are never auto-moved to "No Response", show first (named with a star in the daily reminder), and have a "★ Starred" filter.
+ 3. SUNDAY WEEKLY SUMMARY
+    - A notification on Sunday after 9 am: applications (vs last week), replies, interviews, offers, starred jobs waiting.
+    - Same numbers in Dashboard -> Overview -> "Your week". Settings -> "Preview the weekly summary now" shows it immediately.
 
-TEST CHECKLIST (30 min, on the real portals, clean Chrome profile)
- 1 LinkedIn Easy Apply -> toast "Saved — Company" with Undo/Edit, correct company+role
- 2 LinkedIn plain "Apply" (opens company site) -> "Did you apply?" bar when you return
- 3 Naukri 1-click apply -> saved; chrome://extensions > AppliedIn > Errors is empty
- 4 Naukri job that redirects to a confirmation page -> correct role saved (not "Naukri")
- 5 Internshala Apply now -> submit -> saved as Internship
- 6 Re-open an applied job -> green "Already applied" banner; "✓ Applied" badge in lists
- 7 Open a listing that says "you have applied" without clicking anything -> nothing saved
- 8 Popup: change status, edit, delete + Undo, Back up, Restore
- 9 Load v1.1 over your old v1.0 folder -> old applications still there
-10 Settings > "track any company career website" -> permission prompt, then works
-
-IF A PORTAL SHOWS THE WRONG COMPANY/ROLE
-Right-click the text > Inspect > copy its class name > add it at the FRONT of that portal's
-"company" or "role" list in extension/content/adapters.js. Then rebuild frontend/appliedin-extension.zip
-(zip the extension folder) and push. Or, without any new release, put it in frontend/selectors.json:
-{"version":2,"portals":{"naukri":{"company":[".new-class"]}}}   (raise "version" each time)
-
-UPDATING EXISTING USERS
-Extensions installed with "Load unpacked" cannot auto-update. Tell them: Back up (⋯ menu) ->
-extract new zip into the SAME folder (replace files) -> click reload on chrome://extensions.
-Moving the folder creates a new empty extension; "Restore from backup" fixes that.
-
-COST: everything here is free. Optional later: Edge Add-ons (free) or Chrome Web Store (one-time US$5).
+QUICK TEST (5 min)
+ - Settings: type a resume name -> apply to a job -> open its details: the resume is filled in.
+ - Star an application in the popup -> it moves to the top with a star; Dashboard -> Applications -> "★ Starred" chip.
+ - Settings -> "Preview the weekly summary now" -> a notification appears (if not: allow Chrome notifications in your system settings).
+ - Dashboard -> Insights -> after ~10 tagged applications the resume table fills in.

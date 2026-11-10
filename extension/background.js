@@ -75,11 +75,13 @@ function main() {
         switch (msg && msg.type) {
           case 'SAVE_APP': {
             const d = msg.data || {};
+            if (!d.resume) { const set0 = await Store.settings(); if (set0.defaultResume) d.resume = set0.defaultResume; }      // tag with the resume you are using now
             if (!d.company || !d.role) return respond({ saved: false, error: 'Company and role are required' });
             return respond(await Store.add(d, { force: !!msg.force }));
           }
           case 'PING': return respond({ ok: true, version: chrome.runtime.getManifest().version, count: (await Store.getAll()).length });
           case 'SELF_TEST': return respond(await Store.selfTest());
+          case 'WEEKLY_NOW': { const set1 = await Store.settings(), w = Store.weeklyStats(await Store.getAll(), set1), m = weeklyMessage(w); notify('ai-week-' + Date.now(), m.title, m.message); return respond(w); }
           case 'GET_DEBUG': return respond(await debugInfo());
           case 'EXIT_DASH': {            // close the dashboard tab, then bring the quick popup back
           respond(true);
@@ -147,7 +149,7 @@ function main() {
   }
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== 'local') return;
-    if (ch.__rev) updateBadge();
+    if (ch.__rev) { Store.invalidate(); updateBadge(); }
     if (ch.settings) { syncCareers(); syncGmail(); updateBadge(); }
   });
 
@@ -155,8 +157,13 @@ function main() {
   function notify(id, title, message) {
     chrome.notifications.create(id, { type: 'basic', iconUrl: 'icons/icon128.png', title, message: message.slice(0, 200) });
   }
-  const names = list => list.slice(0, 3).map(a => a.company).join(', ') + (list.length > 3 ? ' +' + (list.length - 3) + ' more' : '');
+  const names = list => list.slice(0, 3).map(a => (a.starred ? '★ ' : '') + a.company).join(', ') + (list.length > 3 ? ' +' + (list.length - 3) + ' more' : '');
   const dayStr = d => d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  function weeklyMessage(w) {
+    const d = w.applied - w.appliedPrev, trend = d > 0 ? 'up ' + d + ' on last week 🎉' : d < 0 ? 'down ' + (-d) + ' on last week' : 'same as last week';
+    return { title: 'Your week in job hunting', message: 'Applied ' + w.applied + ' (' + trend + ') · Replies ' + w.replies + ' · Interviews ' + w.interviews + (w.offers ? ' · Offers ' + w.offers + ' 🎉' : '') +
+      '. ' + (w.starredWaiting ? w.starredWaiting + ' ★ dream jobs waiting for a follow-up. ' : w.waiting + ' waiting for a reply. ') + (w.applied < w.goal / 2 ? 'A few more applications this week would help.' : 'Keep it up!') };
+  }
   async function runMaintenance() {
     const s = await Store.settings();
     const r = await Store.maintenance(s);
@@ -166,6 +173,10 @@ function main() {
       if (r.ghosted) notify('ai-ghost-' + Date.now(), r.ghosted + ' marked as No Response', 'No update for ' + s.ghostDays + '+ days. Change this in Settings.');
       // ONE friendly digest per day (after 9 am) instead of hundreds of separate alerts
       const now = new Date();
+      if (s.weeklySummary !== false && now.getDay() === 0 && now.getHours() >= 9 && s.lastWeeklyKey !== dayStr(now)) {        // Sunday summary, once
+        const wm = weeklyMessage(Store.weeklyStats(await Store.getAll(), s)); notify('ai-week-' + Date.now(), wm.title, wm.message);
+        await Store.saveSettings({ lastWeeklyKey: dayStr(now) });
+      }
       if (now.getHours() >= 9 && s.lastDigestDay !== dayStr(now)) {
         const att = Store.attention(await Store.getAll(), s);
         if (att.due.length) {
@@ -231,22 +242,28 @@ function main() {
     } catch (e) {}
   }
   async function handleEmails(items) {
-    const s = await Store.settings(); if (!s.gmailSync) return { changed: 0 };
-    const apps = await Store.getAll();
+    const s = await Store.settings(); if (!s.gmailSync) return { changed: 0, pending: 0 };
+    const S2 = self.AppliedInShared, apps = await Store.index();      // cached slim list — no full database read per batch
     const st = await chrome.storage.local.get('emailSeen'), seen = new Set(Array.isArray(st.emailSeen) ? st.emailSeen : []);
-    const updates = [], done = [];
+    const updates = [], pend = [], done = [];
     for (const it of items) {
       if (!it || !it.id || seen.has(it.id)) continue;
-      const c = self.AppliedInShared.classifyEmail([it.subject, it.snippet, it.body].join(' '));
+      const c = S2.classifyEmail([it.subject, it.snippet, it.body].join(' '));
       if (!c.status) { done.push(it.id); continue; }
-      const app = self.AppliedInShared.matchEmailToApp(apps, it);
-      if (!app) continue;                       // maybe an application we have not saved yet — look again next time
-      updates.push({ id: app.id, status: c.status, reason: c.reason, subject: String(it.subject || '').slice(0, 90) }); done.push(it.id);
+      const m = S2.matchEmail(apps, it, c.status);
+      if (!m) continue;                          // not a company we applied to (or nothing to change) — look again next time
+      if (m.app) updates.push({ id: m.app.id, status: c.status, reason: c.reason, subject: String(it.subject || '').slice(0, 90) });
+      else pend.push({ id: it.id, from: String(it.fromName || it.fromEmail || '').slice(0, 60), subject: String(it.subject || '').slice(0, 120), status: c.status, reason: c.reason, candidates: m.candidates.map(a => a.id), at: new Date().toISOString() });
+      done.push(it.id);
     }
     const r = updates.length ? await Store.syncStatuses(updates, 'email') : { changed: 0, names: [] };
+    const added = pend.length ? await Store.addPending(pend) : 0;
     if (done.length) await chrome.storage.local.set({ emailSeen: Array.from(seen).concat(done).slice(-3000) });
-    if (r.changed && s.notifications) notify('ai-mail-' + Date.now(), r.changed + ' application' + (r.changed > 1 ? 's' : '') + ' updated from your inbox', names(r.names.map(c => ({ company: c }))));
-    return { changed: r.changed };
+    if (s.notifications) {
+      if (r.changed) notify('ai-mail-' + Date.now(), r.changed + ' application' + (r.changed > 1 ? 's' : '') + ' updated from your inbox', names(r.names.map(c => ({ company: c }))));
+      if (added) notify('ai-pend-' + Date.now(), added + ' repl' + (added > 1 ? 'ies need' : 'y needs') + ' your choice', 'A company has several roles from you — tell AppliedIn which one the email is about.');
+    }
+    return { changed: r.changed, pending: added };
   }
   chrome.permissions.onRemoved.addListener(() => { syncCareers(); syncGmail(); });
 

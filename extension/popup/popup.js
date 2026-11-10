@@ -4,7 +4,9 @@
   const $ = id => document.getElementById(id);
   let apps = [], settings = Store.DEFAULTS, filter = 'all', q = '', limit = 60, openId = null, exportType = 'csv', period = 'all', snackT = null;
 
-  async function load() { apps = await Store.getAll(); settings = await Store.settings(); render(); }
+  let pending = [];
+  function fillResumeList() { const dl = $('resumeList'); dl.textContent = ''; Array.from(new Set(apps.map(a => a.resume).filter(Boolean))).slice(0, 20).forEach(r => dl.appendChild(h('option', { value: r }))); }
+  async function load() { apps = await Store.getAll(); settings = await Store.settings(); pending = await Store.pending(); fillResumeList(); render(); }
 
   // ───────── stats ─────────
   function startOf(kind) {
@@ -31,24 +33,27 @@
     const att = Store.attention(apps, settings), need = att.due.length + att.soon.length, b = $('attention');
     b.hidden = !need; b.className = 'strip' + (att.soon.length ? ' warn' : '');
     if (need) { b.textContent = '⏰ ' + (att.soon.length ? att.soon.length + ' interview' + (att.soon.length > 1 ? 's' : '') + ' soon · ' : '') + att.due.length + ' waiting for a reply — review follow-ups ›'; b.onclick = () => openBoard('followups'); }
+    const ps = $('pendingStrip'); ps.hidden = !pending.length;
+    if (pending.length) { ps.textContent = '✉ ' + pending.length + ' repl' + (pending.length > 1 ? 'ies need' : 'y needs') + ' your choice (which role?) ›'; ps.onclick = () => openBoard('followups'); }
     const bw = $('backupWarn'), last = settings.lastBackupAt || 0, stale = Date.now() - last > 14 * 864e5;
     bw.hidden = !(apps.length >= 10 && stale);
     if (!bw.hidden) { bw.textContent = '💾 ' + (last ? 'Last backup ' + Math.floor((Date.now() - last) / 864e5) + ' days ago' : 'You have never backed up') + ' — back up now ›'; bw.onclick = backup; }
   }
   function renderChips() {
     const nav = $('chips'); nav.textContent = '';
-    ['all'].concat(S.STATUSES).forEach(s => {
-      const n = s === 'all' ? apps.length : apps.filter(a => a.status === s).length;
+    ['all', 'starred'].concat(S.STATUSES).forEach(s => {
+      const n = s === 'all' ? apps.length : s === 'starred' ? apps.filter(a => a.starred).length : apps.filter(a => a.status === s).length;
+      if (s === 'starred' && !n && filter !== 'starred') return;
       if (s !== 'all' && !n && s !== filter) return;
-      nav.appendChild(h('button', { class: 'chip', type: 'button', 'aria-pressed': String(filter === s), text: (s === 'all' ? 'All' : s) + ' ' + n, onclick: () => { filter = s; limit = 60; render(); } }));
+      nav.appendChild(h('button', { class: 'chip', type: 'button', 'aria-pressed': String(filter === s), text: (s === 'all' ? 'All' : s === 'starred' ? '★ Starred' : s) + ' ' + n, onclick: () => { filter = s; limit = 60; render(); } }));
     });
   }
 
   // ───────── list ─────────
   function visible() {
     const t = q.trim().toLowerCase();
-    return apps.filter(a => (filter === 'all' || a.status === filter) &&
-      (!t || (a.company + ' ' + a.role + ' ' + a.platform + ' ' + (a.location || '')).toLowerCase().indexOf(t) >= 0));
+    return apps.filter(a => (filter === 'all' || (filter === 'starred' ? a.starred : a.status === filter)) &&
+      (!t || (a.company + ' ' + a.role + ' ' + a.platform + ' ' + (a.location || '') + ' ' + (a.resume || '')).toLowerCase().indexOf(t) >= 0));
   }
   function dueFlag(a) {
     if (a.status !== 'Applied' && a.status !== 'In Review') return '';
@@ -74,9 +79,10 @@
       salary: h('input', { value: a.salary || '' }), url: h('input', { type: 'url', value: a.url || '' }),
       interview: h('input', { type: 'datetime-local', value: toLocalInput(a.interviewDate) }),
       follow: h('input', { type: 'date', value: toLocalInput(a.followUpDate, true) }),
+      resume: h('input', { list: 'resumeList', placeholder: 'e.g. Resume v2 – Data Analyst' }),
       notes: h('textarea', { placeholder: 'Recruiter name, salary talk, things to prepare…' })
     };
-    f.notes.value = a.notes || '';
+    f.notes.value = a.notes || ''; f.resume.value = a.resume || '';
     ['company', 'role', 'location', 'salary', 'url'].forEach(k => { f[k].value = a[k] || ''; });
     const L = (t, el) => [h('label', { text: t }), el];
     return h('div', { class: 'detail' },
@@ -84,17 +90,20 @@
       h('div', { class: 'two' }, h('div', null, L('Location', f.location)), h('div', null, L('Salary / stipend', f.salary))),
       L('Job link', f.url),
       h('div', { class: 'two' }, h('div', null, L('Interview date', f.interview)), h('div', null, L('Follow up on', f.follow))),
+      L('Resume used', f.resume),
       L('Notes', f.notes),
       a.jd ? h('details', { class: 'jd' }, h('summary', { text: 'Saved job description' }), h('pre', { text: a.jd })) : null,
       h('div', { class: 'acts' },
         h('button', { class: 'primary', type: 'button', text: 'Save changes', onclick: async () => {
           if (!f.company.value.trim() || !f.role.value.trim()) return snack('Company and role are required');
           await Store.update(a.id, { company: f.company.value.trim(), role: f.role.value.trim(), location: f.location.value.trim(), salary: f.salary.value.trim(),
-            url: f.url.value.trim(), interviewDate: fromLocalInput(f.interview.value), followUpDate: fromLocalInput(f.follow.value), notes: f.notes.value });
+            url: f.url.value.trim(), interviewDate: fromLocalInput(f.interview.value), followUpDate: fromLocalInput(f.follow.value), notes: f.notes.value, resume: f.resume.value.trim() });
           openId = null; await load(); snack('Saved');
         } }),
         a.url ? h('button', { type: 'button', text: 'Open job', onclick: () => chrome.tabs.create({ url: a.url }) }) : null,
-        h('button', { type: 'button', text: 'Search my email', title: 'Opens Gmail searching for this company', onclick: () => chrome.tabs.create({ url: 'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent('"' + a.company + '"') }) }),
+        h('button', { type: 'button', text: 'Search my email', title: 'Opens Gmail searching for this company', onclick: () => chrome.tabs.create({ url: S.mailSearchUrl(a) }) }),
+        h('button', { type: 'button', text: 'This role only', title: 'Searches Gmail for this company AND this role', onclick: () => chrome.tabs.create({ url: S.mailSearchUrl(a, true) }) }),
+        (a.status === 'Applied' || a.status === 'In Review') ? h('button', { type: 'button', text: 'Draft follow-up', onclick: () => chrome.tabs.create({ url: S.followUpDraft(a, settings.userName).url }) }) : null,
         (a.status === 'Applied' || a.status === 'In Review') && !a.followUpDismissed ? h('button', { type: 'button', text: 'Stop reminders', onclick: async () => { await Store.update(a.id, { followUpDismissed: true }); await load(); } }) : null,
         h('button', { class: 'danger', type: 'button', text: 'Delete', onclick: () => del(a) })));
   }
@@ -104,17 +113,18 @@
   }
   function card(a) {
     const flag = dueFlag(a), open = openId === a.id;
-    const tags = [a.platform, a.jobType, a.workMode].filter(Boolean).map(t => h('span', { class: 'tag', text: t }));
+    const tags = [a.platform, a.jobType, a.workMode, a.resume ? '📄 ' + a.resume : ''].filter(Boolean).map(t => h('span', { class: 'tag', text: t }));
     return h('article', { class: 'app' + (open ? ' open' : '') },
       h('div', { class: 'app-h', role: 'button', tabindex: '0', 'aria-expanded': String(open),
         onclick: () => { openId = open ? null : a.id; render(); },
         onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openId = open ? null : a.id; render(); } } },
         h('div', { class: 'app-m' },
-          h('div', { class: 'co', text: a.company }), h('div', { class: 'ro', text: a.role }),
+          h('div', { class: 'co', text: (a.starred ? '★ ' : '') + a.company }), h('div', { class: 'ro', text: a.role }),
           h('div', { class: 'meta' }, tags, U.fmtDate(a.date), flag ? h('span', { class: 'flag', text: ' · ' + flag }) : null,
             a.interviewDate ? h('span', { class: 'flag', text: ' · Interview ' + U.fmtDate(a.interviewDate) }) : null)),
         h('div', { class: 'app-r', onclick: e => e.stopPropagation(), onkeydown: e => e.stopPropagation() }, statusSelect(a),
           h('div', { class: 'app-btns' },
+            h('button', { class: 'ib star' + (a.starred ? ' on' : ''), type: 'button', 'aria-pressed': String(!!a.starred), title: a.starred ? 'Remove star' : 'Star — a dream company (earlier follow-ups, never auto-closed)', 'aria-label': (a.starred ? 'Remove star from ' : 'Star ') + a.company, text: a.starred ? '★' : '☆', onclick: async () => { await Store.update(a.id, { starred: !a.starred }); await load(); } }),
             h('button', { class: 'ib', type: 'button', title: 'Edit', 'aria-label': 'Edit ' + a.company, text: '✎', onclick: () => { openId = open ? null : a.id; render(); } }),
             h('button', { class: 'ib del', type: 'button', title: 'Delete', 'aria-label': 'Delete ' + a.company, text: '🗑', onclick: () => del(a) })))),
       open ? detail(a) : null);
@@ -123,6 +133,7 @@
     const list = $('list'); list.textContent = '';
     const v = visible(); $('empty').hidden = v.length > 0;
     $('emptyMsg').textContent = apps.length ? 'No applications match this search or filter.' : 'Apply on LinkedIn, Naukri or Internshala and your applications appear here automatically. You can also add one by hand.';
+    v.sort((x, y) => (y.starred ? 1 : 0) - (x.starred ? 1 : 0));      // stable: newest-first order is kept inside each group
     v.slice(0, limit).forEach(a => list.appendChild(card(a)));
     if (v.length > limit) list.appendChild(h('button', { class: 'more', type: 'button', text: 'Show ' + Math.min(60, v.length - limit) + ' more of ' + (v.length - limit), onclick: () => { limit += 60; renderList(); } }));
   }
@@ -137,13 +148,13 @@
   }
 
   // ───────── add job ─────────
-  function openAdd() { ['addCompany', 'addRole', 'addLocation', 'addSalary', 'addUrl'].forEach(i => $(i).value = ''); $('addErr').hidden = true; $('addForce').hidden = true; $('addStatus').value = 'Applied'; $('addModal').hidden = false; $('addCompany').focus(); }
+  function openAdd() { ['addCompany', 'addRole', 'addLocation', 'addSalary', 'addUrl'].forEach(i => $(i).value = ''); $('addResume').value = settings.defaultResume || ''; $('addErr').hidden = true; $('addForce').hidden = true; $('addStatus').value = 'Applied'; $('addModal').hidden = false; $('addCompany').focus(); }
   async function saveAdd(force) {
     const company = $('addCompany').value.trim(), role = $('addRole').value.trim(), err = $('addErr');
     if (!company || !role) { err.textContent = 'Enter the company and the job role.'; err.hidden = false; return; }
     const url = $('addUrl').value.trim();
     if (url && !/^https?:\/\//i.test(url)) { err.textContent = 'The job link must start with http:// or https://'; err.hidden = false; return; }
-    const r = await Store.add({ company, role, location: $('addLocation').value.trim(), salary: $('addSalary').value.trim(), url, platform: $('addPlatform').value, status: $('addStatus').value, source: 'manual' }, { force: force === true });
+    const r = await Store.add({ company, role, location: $('addLocation').value.trim(), salary: $('addSalary').value.trim(), url, resume: $('addResume').value.trim(), platform: $('addPlatform').value, status: $('addStatus').value, source: 'manual' }, { force: force === true });
     if (r.error) { err.textContent = r.error; err.hidden = false; return; }
     if (r.duplicate) { err.textContent = 'You already have ' + r.existing.company + ' — ' + r.existing.role + ' (' + r.existing.status + ', ' + U.fmtDate(r.existing.date) + '), matched by ' + r.reason + '. If this is a different job, press “Add anyway”.'; err.hidden = false; $('addForce').hidden = false; return; }
     $('addModal').hidden = true; await load(); snack(r.promoted ? 'Moved to Applied' : 'Added ' + company);
@@ -212,7 +223,7 @@
     $('mBackup').onclick = backup; $('mRestore').onclick = () => $('fileRestore').click();
     $('fileRestore').onchange = e => { if (e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; };
     document.addEventListener('keydown', e => { if (e.key === 'Escape') ['addModal', 'exportModal', 'setModal'].forEach(i => $(i).hidden = true); });
-    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.__rev) load(); });
+    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.__rev || ch.emailPending)) load(); });
   }
   wire(); load();
 })();

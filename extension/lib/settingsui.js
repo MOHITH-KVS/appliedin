@@ -33,6 +33,11 @@
       sel.addEventListener('change', () => save({ [key]: sel.value }));
       return h('div', { class: 'num' }, h('label', { for: 'set-' + key, text: title }), sel, hint ? h('small', { class: 'muted', text: hint }) : null);
     }
+    function text(key, title, ph, hint) {
+      const input = h('input', { type: 'text', id: 'set-' + key, placeholder: ph, maxlength: 60 }); input.value = s[key] || '';
+      input.addEventListener('change', () => save({ [key]: input.value.trim() }));
+      return h('div', { class: 'num' }, h('label', { for: 'set-' + key, text: title }), input, hint ? h('small', { class: 'muted', text: hint }) : null);
+    }
     // Optional permissions must be requested directly inside the click handler (browser rule)
     function permToggle(key, origins, title, hint, message) {
       const input = h('input', { type: 'checkbox', id: 'set-' + key });
@@ -60,8 +65,13 @@
       h('h3', { class: 'set-h', text: 'Replies & reminders' }),
       permToggle('gmailSync', D.gmail, 'Detect replies from my Gmail', 'Looks at sender, subject and preview of emails in your open Gmail tab, on your computer, and moves matching applications to Shortlisted, Interview, Offer or Rejected. Nothing is uploaded.', 'SYNC_GMAIL'),
       toggle('notifications', 'Desktop reminders (daily follow-up summary and interviews)'),
+      text('defaultResume', 'Resume you are using now', 'e.g. Resume v2 – Data Analyst', 'New applications are tagged with it automatically, so you can see later which resume gets replies. Change it when you switch resumes.'),
+      text('userName', 'Your name (for follow-up email drafts)', 'e.g. Mohith Venkata', 'Used only to sign the draft emails. Stays on this device.'),
       select('badgeMode', 'Number on the toolbar icon', [['off', 'Off (recommended)'], ['interviews', 'Only interviews coming up'], ['today', 'Applications made today']]),
       h('div', { class: 'row2' }, number('followUpDays', 'Remind me after (days)', 1, 60), number('ghostDays', 'No Response after (days)', 7, 180)),
+      number('starFollowUpDays', 'Follow up ★ starred jobs after (days)', 1, 30),
+      toggle('weeklySummary', 'Sunday weekly summary notification'),
+      h('button', { class: 'linkbtn', type: 'button', text: 'Preview the weekly summary now', onclick: () => { chrome.runtime.sendMessage({ type: 'WEEKLY_NOW' }); say('Sent — check your notifications'); } }),
       toggle('autoGhost', 'Mark as “No Response” automatically'),
       number('dailyGoal', 'Daily goal (applications)', 1, 200),
       h('button', { class: 'linkbtn', type: 'button', text: 'Send a test notification', onclick: () => { chrome.runtime.sendMessage({ type: 'TEST_NOTIFY' }); say('Sent — if nothing appears, check Windows/Mac notification settings for Chrome'); } }),

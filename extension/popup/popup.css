@@ -87,3 +87,6 @@ details.jd pre{white-space:pre-wrap;max-height:140px;overflow:auto;font:12px/1.5
 .app-btns{display:flex;gap:4px}
 .ib{border:1px solid var(--line);background:#fff;border-radius:6px;width:30px;height:26px;padding:0;font-size:13px;line-height:1}.ib:hover{background:#f1f5f9}.ib.del:hover{background:#fee2e2;border-color:#fca5a5}
 .diag{white-space:pre-wrap;font:12px/1.5 ui-monospace,Consolas,monospace;background:#f1f5f9;border-radius:8px;padding:8px;margin:6px 0}
+
+.ib.star{color:#94a3b8}.ib.star.on{color:#d97706;background:#fffbeb;border-color:#fcd34d}.ib.star:hover{color:#d97706}
+.ib{width:28px}
